@@ -465,10 +465,15 @@ function matchAnswer(text,q){
   return{other:text.trim()};
 }
 
+/* ---------- email links ---------- */
+function safeMailLink(u){u=String(u||"");return /^https:\/\/(outlook\.office\.com|outlook\.office365\.com|outlook\.cloud\.microsoft)\//.test(u)?u:"";}
+function setQLink(u){let a=document.getElementById("qlink");if(!a){a=document.createElement("a");a.id="qlink";a.target="_blank";a.rel="noopener";a.textContent="Open email \u2197";a.style.cssText="display:inline-block;margin:4px 0 8px;font-size:15px;font-weight:600;";qmeta.insertAdjacentElement("afterend",a);}const s=safeMailLink(u);a.hidden=!s;if(s)a.href=s;else a.removeAttribute("href");}
+
 /* ---------- session ---------- */
 function renderQuestion(q){
   currentQ=q;
   qmeta.textContent=REMOTE?(q.meta||"Alfred"):("Question "+(idx+1)+" of "+QUESTIONS.length);
+  setQLink(REMOTE?q.link:"");
   qEl.textContent=q.text; optsEl.innerHTML="";
   q.opts.forEach((o,i)=>{const b=document.createElement("button");b.className="opt";b.type="button";
     b.innerHTML='<span class="n">'+(i+1)+'</span><span></span><span class="say">say “'+o[1][0]+'”</span>';
@@ -567,7 +572,7 @@ const answers={}, drafts={}; let remoteReady=false, remoteBusy=false, backAllowe
 const STOPW=new Set(["the","and","for","with","from","it's","its","this","that","your","you","my","in","of","to","a","an"]);
 const bridge=document.createElement("pre"); bridge.id="alfredBridge"; bridge.hidden=true; document.body.appendChild(bridge);
 function publishBridge(){bridge.textContent=JSON.stringify({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok",batch:(typeof batch!=="undefined"?batch:null),answers});}
-function toQ(r){return{meta:r.meta,text:String(r.text||""),opts:(r.options||[]).map(l=>{l=String(l);const low=l.toLowerCase();
+function toQ(r){return{meta:r.meta,link:r.link,text:String(r.text||""),opts:(r.options||[]).map(l=>{l=String(l);const low=l.toLowerCase();
   const words=low.replace(/[^a-z0-9' ]/g," ").split(/\s+/).filter(w=>w&&(w.length>2||w==="no")&&!STOPW.has(w));return[l,[low,...words],l];})};}
 function setBack(on){backAllowed=!!on; $("backBtn").disabled=!running||!backAllowed;}
 async function remoteAsk(r,inBatch){
@@ -892,7 +897,9 @@ function renderBoard(){
     const a=ago(em.at); $("emAsOf").textContent=(a.txt||"")+(em.source?" · "+em.source:""); $("emAsOf").classList.toggle("stale",!!a.stale);
     const ol=$("emList"); ol.innerHTML="";
     (em.items||[]).forEach(x=>{const li=document.createElement("li");li.innerHTML="<b></b> <span></span>";li.querySelector("b").textContent=String(x.from||"");
-      li.querySelector("span").textContent="– "+String(x.subject||"")+(x.action?" – "+x.action:"")+(x.due?" (by "+x.due+")":"");ol.appendChild(li);});
+      li.querySelector("span").textContent="– "+String(x.subject||"")+(x.action?" – "+x.action:"")+(x.due?" (by "+x.due+")":"");
+      const lk=safeMailLink(x.link);if(lk){const a=document.createElement("a");a.href=lk;a.target="_blank";a.rel="noopener";a.textContent=" Open \u2197";li.appendChild(a);}
+      ol.appendChild(li);});
     $("emDetails").hidden=!(em.items&&em.items.length);}
   lastFlash=null;
 }
@@ -918,7 +925,7 @@ api.addTask=(x)=>{ if(!board.myday){board.myday={at:new Date().toISOString(),sou
   const it={id:String(x&&x.id!=null?x.id:"new"+Date.now()),title:cleanTitle(x&&x.title),tier:String((x&&x.tier)||"P2"),n:+(x&&x.n)||99,status:String((x&&x.status)||"open"),overdue:false};
   board.myday.items.push(it); lastFlash=it.id; bSave(); return it.id; };
 api.emails=(e)=>{ if(!e)return"bad-input"; board.emails={at:new Date().toISOString(),source:String(e.source||""),count:+e.count||0,
-  items:Array.isArray(e.items)?e.items.map(x=>({from:String(x.from||""),subject:String(x.subject||""),action:String(x.action||""),due:String(x.due||"")})):null};
+  items:Array.isArray(e.items)?e.items.map(x=>({from:String(x.from||""),subject:String(x.subject||""),action:String(x.action||""),due:String(x.due||""),link:safeMailLink(x.link)})):null};
   bSave(); return board.emails.items?board.emails.items.length:board.emails.count; };
 api.board=()=>JSON.parse(JSON.stringify(board));
 window.alfredRemote=api;
