@@ -6,7 +6,7 @@
 <style>[hidden]{display:none!important}body{margin:0}img{max-width:100%}</style>
 </head>
 <body>
-<title>Alfred Desk Assistant</title>
+<title>Alfred</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <style>
@@ -609,7 +609,7 @@ const api={
 window.alfredRemote=api;
 document.addEventListener("alfred-command",e=>{try{const c=JSON.parse(e.detail);const res=api[c.cmd]?api[c.cmd](c.arg):"unknown";bridge.dataset.last=JSON.stringify(res);}catch(err){bridge.dataset.last=JSON.stringify("error");}publishBridge();});
 if(REMOTE){
-  document.title="Alfred Morning Brief";
+  document.title="Alfred";
   $("startBtn").textContent="Wake Alfred";
   heard.textContent="Click Wake Alfred, then allow the microphone. The morning brief will send its questions here.";
   qmeta.textContent="Morning brief";
