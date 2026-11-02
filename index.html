@@ -245,11 +245,11 @@ details.em li span{color:var(--muted)}
       </g>
     </svg>
     <div class="status"><span class="dot"></span><span id="statusText">Ready</span></div>
-    <div class="heard" id="heard" aria-live="polite">Asleep. Say “Hey Alfred” to wake him.</div>
+    <div class="heard" id="heard" aria-live="polite">Snoozing. Say “Hey Alfred” to wake him.</div>
     <div class="controls">
       <button id="backBtn" disabled>◀ Back</button>
       <button class="primary" id="startBtn">Wake Alfred</button>
-      <button id="sleepBtn" hidden>Sleep</button>
+      <button id="sleepBtn" hidden>Snooze</button>
       <button id="repeatBtn" disabled>Repeat</button>
       <button id="skipBtn" disabled>Skip</button>
       <button id="laterBtn" disabled>Later</button>
@@ -289,7 +289,7 @@ details.em li span{color:var(--muted)}
       <input id="typedInput" type="text" placeholder="Or type a different answer" autocomplete="off">
       <button type="submit">Answer</button>
     </form>
-    <p class="hint" id="hint">Say “Hey Alfred” to wake him and “Sleep Alfred” to send him to sleep. Asleep, he listens only for his name, and only while this tab is on screen.</p>
+    <p class="hint" id="hint">Say “Hey Alfred” to wake him and “Snooze Alfred” to send him back to sleep. Snoozing, he listens only for his name, and only while this tab is on screen.</p>
     <div class="notice" id="micNotice" hidden></div>
     <div class="log">
       <h2>Answers</h2>
@@ -537,7 +537,7 @@ function stop(quiet){
   if(wakeChk.checked)startWake();
 }
 
-$("startBtn").addEventListener("click",()=>{if(asleep){wakeUp(REMOTE?"remote":"button");return;} if(REMOTE)wakeRemote();});
+$("startBtn").addEventListener("click",()=>{if(asleep){wakeUp(REMOTE&&!everWoken?"remote":"button");return;} if(REMOTE)wakeRemote();});
 $("stopBtn").addEventListener("click",()=>stop());
 $("skipBtn").addEventListener("click",()=>answer({cmd:"skip"}));
 $("laterBtn").addEventListener("click",()=>answer({cmd:"later"}));
@@ -891,7 +891,8 @@ window.alfredRemote=api;
    Awake: listens for "Sleep Alfred" between questions. "Sleep Alfred" from Phil holds until he wakes him or 06:00 next day;
    routines then can't wake him and fall back to asking in Claude. */
 const WAKE_RE=/\b(hey|hi|okay|ok|morning|wake up)\s*,?\s*(alfred|alfie|alford|elfred)\b/;
-const SLEEP_RE=/(\b(sleep|go to sleep|goodnight|good night|night night)\s*,?\s*(alfred|alfie|alford|elfred)\b)|(\b(alfred|alfie)\s*,?\s*(go to )?sleep\b)/;
+const SLEEP_RE=/(\b(sleep|snooze|go to sleep|goodnight|good night|night night)\s*,?\s*(alfred|alfie|alford|elfred)\b)|(\b(alfred|alfie)\s*,?\s*(go to sleep|sleep|snooze)\b)/;
+let everWoken=false;
 const DND_KEY="alfred.dnd.v1", LIVE_KEY="alfred.live.v1", TAB_ID=Math.random().toString(36).slice(2);
 let asleep=true, lastActive=Date.now();
 function lsGet(k){try{return JSON.parse(localStorage.getItem(k)||"null");}catch(e){return null;}}
@@ -906,18 +907,19 @@ function renderSleep(){
   if(asleep){eyeL.setAttribute("ry",1.3);eyeR.setAttribute("ry",1.3);stage.classList.remove("speaking","listening");}
   else{eyeL.setAttribute("ry",EYE_RY);eyeR.setAttribute("ry",EYE_RY);}
   $("startBtn").hidden=!asleep; $("startBtn").disabled=false; $("sleepBtn").hidden=asleep;
-  if(asleep){statusText.textContent="Asleep"; heard.classList.remove("interim");
-    heard.textContent= dndOn()?"Asleep because you said so. Say “Hey Alfred” to wake him."
-      : otherLive()?"Asleep. Alfred is working in another tab."
-      : micBlocked?"Asleep. Press Wake Alfred."
-      : document.visibilityState!=="visible"?"Asleep. Not listening while this tab is in the background."
-      : "Asleep. Listening only for “Hey Alfred”.";}
-  if(!REMOTE){qmeta.textContent="Alfred"; qEl.textContent=asleep?"Asleep. Say “Hey Alfred” to wake him.":"Awake. Say “Sleep Alfred” to send him back to sleep. Routines open their own Alfred tab for their questions; this tab keeps your My Day and emails on screen.";}
+  if(asleep){statusText.textContent="Snoozing"; heard.classList.remove("interim");
+    heard.textContent= dndOn()?"Snoozing until you wake him. Say “Hey Alfred” or press Wake Alfred."
+      : otherLive()?"Snoozing. Alfred is working in another tab."
+      : micBlocked?"Snoozing. Press Wake Alfred."
+      : document.visibilityState!=="visible"?"Snoozing. Not listening while this tab is in the background."
+      : "Snoozing. Listening only for “Hey Alfred”.";}
+  if(!REMOTE){qmeta.textContent="Alfred"; qEl.textContent=asleep?"Snoozing. Say “Hey Alfred” to wake him.":"Awake. Say “Snooze Alfred” to send him back to sleep. Routines open their own Alfred tab for their questions; this tab keeps your My Day and emails on screen.";}
 }
 function wakeUp(source){
   if(source==="remote"&&dndOn()){renderSleep();publishBridge();return false;}
   if(source!=="remote")setDnd(false);
-  asleep=false; lastActive=Date.now(); stopWake(); renderSleep();
+  asleep=false; everWoken=true; lastActive=Date.now(); stopWake(); renderSleep();
+  heard.classList.remove("interim"); heard.textContent="Awake. Say “Snooze Alfred” when you're done.";
   if(REMOTE){lsSet(LIVE_KEY,{tab:TAB_ID,at:Date.now()});wakeRemote();} else {speak("Yes, Phil?");}
   return true;
 }
@@ -927,7 +929,7 @@ function goToSleep(byPhil){
   if(REMOTE){remoteReady=false; if(running)stop(true); else{stopListening(); if(synth)synth.cancel();} clearLive(); publishBridge();}
   else{stopListening();}
   renderSleep();
-  if(was&&byPhil)speak("Goodnight, Phil.").then(renderSleep);
+  if(was&&byPhil)speak("Snoozing. Say Hey Alfred when you need me.").then(renderSleep);
 }
 function ambientWanted(){
   if(!SR||micBlocked||document.visibilityState!=="visible")return false;
