@@ -384,7 +384,7 @@ function matchAnswer(text,q){
 /* ---------- session ---------- */
 function renderQuestion(q){
   currentQ=q;
-  qmeta.textContent=REMOTE?(q.meta||"Morning brief"):("Question "+(idx+1)+" of "+QUESTIONS.length);
+  qmeta.textContent=REMOTE?(q.meta||"Alfred"):("Question "+(idx+1)+" of "+QUESTIONS.length);
   qEl.textContent=q.text; optsEl.innerHTML="";
   q.opts.forEach((o,i)=>{const b=document.createElement("button");b.className="opt";b.type="button";
     b.innerHTML='<span class="n">'+(i+1)+'</span><span></span><span class="say">say “'+o[1][0]+'”</span>';
@@ -411,7 +411,7 @@ async function ask(q){
       if(m.cmd==="repeat"){await speak(q.text);continue;}
       answer(m);return;
     }
-    if(pending&&running){setState("idle","Waiting for your answer"); if(!micBlocked)await speak("I'll wait for you to tap or type an answer.");}
+    if(pending&&running){setState("idle","Waiting for your answer");}
   })();
   return got;
 }
@@ -490,14 +490,14 @@ async function remoteAsk(r,inBatch){
   addLog(out.kind==="option"?esc(out.label)+" <span>— "+esc(q.text.slice(0,70))+(q.text.length>70?"…":"")+"</span>":out.kind==="other"?"<span>Your own answer:</span> “"+esc(out.text)+"”":"<span>"+out.kind+"</span>");
   if(!inBatch)remoteBusy=false; publishBridge();
   if(out.kind!=="stopped")await speak(ACKS[Math.floor(Math.random()*ACKS.length)]);
-  if(running&&!inBatch)setState("idle","Waiting for the brief");
+  if(running&&!inBatch)setState("idle","Waiting for your instruction");
   return out;
 }
 let batch={total:0,asked:0,done:false};
 async function remoteRunAll(list){
   remoteBusy=true; batch={total:list.length,asked:0,done:false}; publishBridge();
   for(let i=0;i<list.length&&running;i++){
-    const r=list[i]; r.meta=r.meta||("Morning brief · "+(i+1)+" of "+list.length);
+    const r=list[i]; r.meta=r.meta||("Question "+(i+1)+" of "+list.length);
     const out=r.type==="free"?await remoteFree(r):r.type==="collect"?await remoteCollect(r):await remoteAsk(r,true); batch.asked=i+1;
     if(!out||out.kind==="stopped")break;
     const fu=r.followUps&&out.kind==="option"&&r.followUps[out.index];
@@ -512,7 +512,7 @@ function wakeRemote(){
   $("startBtn").disabled=true; $("stopBtn").disabled=false; $("skipBtn").disabled=false; $("repeatBtn").disabled=false;
   if(!SR)micUnavailable("unsupported");
   publishBridge();
-  speak("Morning. I'm ready when the brief is.").then(()=>{ if(!micBlocked&&!remoteBusy) listenOnce(1200).then(r=>{ if(r&&r.err&&/not-allowed|service-not-allowed|audio-capture/.test(r.err))micUnavailable("blocked"); publishBridge(); if(!remoteBusy)setState("idle","Waiting for the brief"); }); });
+  speak("Ready when you are, Phil.").then(()=>{ if(!micBlocked&&!remoteBusy) listenOnce(1200).then(r=>{ if(r&&r.err&&/not-allowed|service-not-allowed|audio-capture/.test(r.err))micUnavailable("blocked"); publishBridge(); if(!remoteBusy)setState("idle","Waiting for your instruction"); }); });
 }
 
 /* ---------- free-form reflection and "what's new?" collection ---------- */
@@ -543,7 +543,7 @@ function listenLong(maxMs,silenceMs){
 }
 function renderPlain(r,mode,items){
   currentQ={mode,meta:r.meta,text:r.text,opts:[]};
-  qmeta.textContent=r.meta||"Morning brief"; qEl.textContent=r.text; optsEl.innerHTML="";
+  qmeta.textContent=r.meta||"Alfred"; qEl.textContent=r.text; optsEl.innerHTML="";
   if(items&&items.length){const ul=document.createElement("ol");ul.style.margin="0";ul.style.paddingLeft="1.2em";
     items.forEach(it=>{const li=document.createElement("li");li.textContent=it;ul.appendChild(li);});optsEl.appendChild(ul);}
   const b=document.createElement("button");b.type="button";b.className="opt";
@@ -604,18 +604,18 @@ const api={
   askAll:(list)=>{ if(!remoteReady)return"not-ready"; if(remoteBusy)return"busy"; remoteRunAll(list); return"asking"; },
   results:()=>({batch,answers}),
   say:(text)=>{ if(!remoteReady)return"not-ready"; speak(String(text)); return"speaking"; },
-  finish:(text)=>{ text=String(text||"That's the brief done."); qmeta.textContent="Finished"; qEl.textContent=text; optsEl.innerHTML=""; typed.hidden=true; speak(text); return"ok"; }
+  finish:(text)=>{ text=String(text||"All done."); qmeta.textContent="Finished"; qEl.textContent=text; optsEl.innerHTML=""; typed.hidden=true; speak(text); return"ok"; }
 };
 window.alfredRemote=api;
 document.addEventListener("alfred-command",e=>{try{const c=JSON.parse(e.detail);const res=api[c.cmd]?api[c.cmd](c.arg):"unknown";bridge.dataset.last=JSON.stringify(res);}catch(err){bridge.dataset.last=JSON.stringify("error");}publishBridge();});
 if(REMOTE){
   document.title="Alfred";
   $("startBtn").textContent="Wake Alfred";
-  heard.textContent="Click Wake Alfred, then allow the microphone. The morning brief will send its questions here.";
-  qmeta.textContent="Morning brief";
-  qEl.textContent="Waiting for the brief to start. Keep this tab open.";
+  heard.textContent="Click Wake Alfred, then allow the microphone.";
+  qmeta.textContent="Alfred";
+  qEl.textContent="Waiting for your instruction. Keep this tab open.";
   $("hint").textContent="Say the answer or its number. Say “repeat” to hear it again, or “skip”. Tapping and typing also work.";
-  logEl.innerHTML='<li><span>Your answers go back to the brief, which updates To Do.</span></li>';
+  logEl.innerHTML='<li><span>Your answers go back to Claude, which updates To Do.</span></li>';
   publishBridge();
 }
 
