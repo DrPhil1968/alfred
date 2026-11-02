@@ -43,6 +43,7 @@ select{font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);b
     <button id="start" disabled>Start</button>
     <button id="stop" class="ghost" disabled>Stop</button>
     <label>Character <select id="charSel"></select></label>
+    <label>Lighting <select id="lightSel"><option value="studio">Studio</option><option value="original">Original</option></select></label>
     <label>Voice <select id="voiceSel"></select></label>
   </div>
   <div id="timing"></div>
@@ -59,6 +60,7 @@ select{font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);b
 </script>
 <script type="module">
 import { TalkingHead } from "talkinghead";
+import * as THREE from "three";
 
 const $ = id => document.getElementById(id);
 const QUESTIONS = [
@@ -97,6 +99,28 @@ head = new TalkingHead($("avatar"), {
 });
 window.alfredHead = head;
 
+/* Portrait framing: whole head in shot, camera slightly lower so he isn't looking down at you. */
+const FRAMING = { cameraDistance: 0.6, cameraY: 0.15, cameraRotateX: -0.05 };
+
+/* Studio lighting: warm key light from the front-left, soft cool fill, and a rim light
+   behind to separate him from the background. "Original" restores the library's defaults. */
+const rim = new THREE.DirectionalLight(0xcfe0ff, 2.2); rim.position.set(-1.2, 2.0, -2.2);
+const fill = new THREE.DirectionalLight(0xdfe8ff, 0.7); fill.position.set(2, 1, 1.5);
+head.scene.add(rim, fill);
+function setLighting(mode) {
+  const studio = mode === "studio";
+  head.setLighting(studio
+    ? { lightAmbientColor:0xfff4e6, lightAmbientIntensity:0.6, lightDirectColor:0xffe2c4, lightDirectIntensity:3.2,
+        lightDirectPhi:1.0, lightDirectTheta:-0.6, lightSpotIntensity:0 }
+    : { lightAmbientColor:0xffffff, lightAmbientIntensity:2, lightDirectColor:0x8888aa, lightDirectIntensity:30,
+        lightDirectPhi:0.1, lightDirectTheta:2, lightSpotIntensity:0 });
+  rim.visible = fill.visible = studio;
+  head.scene.environmentIntensity = studio ? 0.45 : 1;
+  head.renderer.toneMappingExposure = studio ? 0.95 : 1;
+}
+setLighting("studio");
+$("lightSel").onchange = e => setLighting(e.target.value);
+
 async function loadCharacter(key) {
   const c = CHARACTERS[key], t0 = performance.now();
   stop(); $("start").disabled = true; $("charSel").disabled = true;
@@ -106,7 +130,7 @@ async function loadCharacter(key) {
     await head.showAvatar({ ...c, lipsyncLang: "en" }, ev => {
       if (ev.lengthComputable) box.textContent = "Loading the 3D character… " + Math.round(ev.loaded/ev.total*100) + "%";
     });
-    head.setView("head");
+    head.setView("head", FRAMING);
     $("timing").textContent = "Character loaded in " + ((performance.now()-t0)/1000).toFixed(1) + " s (faster next time — your browser keeps a copy).";
     $("start").disabled = false;
   } catch (e) {
