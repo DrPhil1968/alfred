@@ -84,6 +84,19 @@ form.typed input{flex:1;min-width:0;font:inherit;padding:8px 12px;border-radius:
 .settings{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;font-size:.88rem;color:var(--muted)}
 .settings select{font:inherit;max-width:100%;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
 .settings label{display:flex;align-items:center;gap:6px}
+.recbox{display:grid;gap:10px;border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--bg)}
+.recrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.reclabel{font-weight:700;margin-right:auto}
+.recdot{width:12px;height:12px;border-radius:50%;background:var(--stage-dot);flex:none}
+.recbox.on .recdot{background:var(--danger);animation:pulse 1s ease-in-out infinite}
+.recbox textarea{font:inherit;width:100%;box-sizing:border-box;min-height:6em;padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);resize:vertical}
+.recbox textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+ol.items{margin:0;padding-left:1.2em;display:grid;gap:4px}
+ol.items li span{vertical-align:middle}
+.item-x{margin-left:8px;padding:0 8px;font-size:.8rem;line-height:1.6}
+.opt.review{align-items:flex-start}
+.opt .rv{display:flex;flex-direction:column;min-width:0}
+.opt .ans{color:var(--muted);font-size:.9rem;overflow-wrap:anywhere}
 </style>
 
 <div class="app">
@@ -186,6 +199,7 @@ form.typed input{flex:1;min-width:0;font:inherit;padding:8px 12px;border-radius:
     <div class="status"><span class="dot"></span><span id="statusText">Ready</span></div>
     <div class="heard" id="heard" aria-live="polite">Press Start, or turn on the wake word and say “Hey Alfred”.</div>
     <div class="controls">
+      <button id="backBtn" disabled>◀ Back</button>
       <button class="primary" id="startBtn">Start</button>
       <button id="repeatBtn" disabled>Repeat</button>
       <button id="skipBtn" disabled>Skip</button>
@@ -199,6 +213,15 @@ form.typed input{flex:1;min-width:0;font:inherit;padding:8px 12px;border-radius:
       <p class="question" id="question">Alfred will talk you through an example to-do list, one question at a time. Answer by voice, by tapping, or by typing.</p>
     </div>
     <div class="options" id="options"></div>
+    <div class="recbox" id="recBox" hidden>
+      <div class="recrow">
+        <span class="recdot"></span><span class="reclabel" id="recLabel">Recording</span>
+        <button type="button" id="recBtn">❚❚ Pause</button>
+        <button type="button" class="primary" id="recDone">✓ That's all</button>
+      </div>
+      <textarea id="freeText" rows="5" placeholder="What you say appears here. You can type or correct it too."></textarea>
+      <div class="hint" id="collectLive"></div>
+    </div>
     <form class="typed" id="typed" hidden>
       <input id="typedInput" type="text" placeholder="Or type a different answer" autocomplete="off">
       <button type="submit">Answer</button>
@@ -371,6 +394,7 @@ function stopListening(){if(currentRec){try{currentRec.abort()}catch(e){}current
 
 function matchAnswer(text,q){
   const t=" "+text.toLowerCase().replace(/[^a-z0-9' ]/g," ")+" ";
+  if(/\b(go back|previous question|back one)\b/.test(t))return{cmd:"back"};
   if(/\b(repeat|say that again|again|pardon)\b/.test(t))return{cmd:"repeat"};
   if(/\b(skip|next one|pass on that)\b/.test(t))return{cmd:"skip"};
   if(/\b(stop|cancel|that's all)\b/.test(t))return{cmd:"stop"};
@@ -390,41 +414,43 @@ function renderQuestion(q){
     b.innerHTML='<span class="n">'+(i+1)+'</span><span></span><span class="say">say “'+o[1][0]+'”</span>';
     b.children[1].textContent=o[0];
     b.addEventListener("click",()=>answer({opt:i}));optsEl.appendChild(b);});
-  typed.hidden=false; typedInput.value="";
+  typed.hidden=false; typedInput.value=""; typedInput.placeholder="Or type a different answer";
+  if(typeof recBox!=="undefined")recBox.hidden=true;
 }
-function answer(a){if(pending){const p=pending;pending=null;stopListening();p(a);}}
+function answer(a){if(pending){const p=pending;pending=null;if(longCtl)longCtl.kill();stopListening();p(a);}}
 function addLog(html){if(!logStarted){logEl.innerHTML="";logStarted=true;}const li=document.createElement("li");li.innerHTML=html;logEl.appendChild(li);}
 function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 
 async function ask(q){
   renderQuestion(q);
-  const got=new Promise(r=>pending=r);
+  const got=new Promise(r=>pending=r); const mine=pending;
   (async()=>{
     await speak(q.text);
     let tries=0;
-    while(pending&&running&&!micBlocked&&tries<2){
+    while(pending===mine&&running&&!micBlocked&&tries<2){
       const r=await listenOnce(9000);
-      if(!pending)return;
+      if(pending!==mine)return;
       if(r.err){ if(r.err==="not-allowed"||r.err==="service-not-allowed"||r.err==="start-failed"||r.err==="audio-capture"){micUnavailable("blocked");break;} tries++; continue;}
       if(!r.text||!r.text.trim()){tries++;continue;}
       const m=matchAnswer(r.text,q);
-      if(m.cmd==="repeat"){await speak(q.text);continue;}
+      if(m.cmd==="repeat"){await speak(q.text);if(pending!==mine)return;continue;}
       answer(m);return;
     }
-    if(pending&&running){setState("idle","Waiting for your answer");}
+    if(pending===mine&&running){setState("idle","Waiting for your answer");}
   })();
   return got;
 }
 
 async function run(){
   if(running)return; running=true; idx=0; stopWake();
-  ["repeatBtn","skipBtn","stopBtn"].forEach(id=>$(id).disabled=false); $("startBtn").disabled=true;
+  ["repeatBtn","skipBtn","stopBtn","backBtn"].forEach(id=>$(id).disabled=false); $("startBtn").disabled=true;
   if(!SR)micUnavailable("unsupported");
   while(running&&idx<QUESTIONS.length){
     const q=QUESTIONS[idx]; const a=await ask(q);
     if(!running)break;
     if(a.cmd==="stop"){stop();break;}
     if(a.cmd==="repeat"){continue;}
+    if(a.cmd==="back"){idx=Math.max(0,idx-1);continue;}
     if(a.cmd==="skip"){addLog("<span>Skipped question "+(idx+1)+"</span>");idx++;await speak("Skipping that one.");continue;}
     if(a.opt!=null){
       [...optsEl.children].forEach((b,i)=>b.classList.toggle("chosen",i===a.opt));
@@ -442,7 +468,8 @@ async function run(){
   stop(true);
 }
 function stop(quiet){
-  running=false; if(pending){const p=pending;pending=null;p({cmd:"stop"});}
+  running=false; if(longCtl){longCtl.kill();longCtl=null;} if(pending){const p=pending;pending=null;p({cmd:"stop"});}
+  $("backBtn").disabled=true; if(typeof recBox!=="undefined")recBox.hidden=true;
   stopListening(); if(synth)synth.cancel(); speaking=false; timeline=[];
   ["repeatBtn","skipBtn","stopBtn"].forEach(id=>$(id).disabled=true); $("startBtn").disabled=false; $("startBtn").textContent="Start again";
   setState("idle","Ready"); if(!quiet)heard.textContent="Stopped.";
@@ -453,6 +480,7 @@ $("startBtn").addEventListener("click",()=>{if(REMOTE){wakeRemote();return;}logS
 $("stopBtn").addEventListener("click",()=>stop());
 $("skipBtn").addEventListener("click",()=>answer({cmd:"skip"}));
 $("repeatBtn").addEventListener("click",()=>answer({cmd:"repeat"}));
+$("backBtn").addEventListener("click",()=>answer({cmd:"back"}));
 typed.addEventListener("submit",e=>{e.preventDefault();const v=typedInput.value.trim();if(!v)return;if(!currentQ)return; if(currentQ.mode==="free")answer({free:v}); else if(currentQ.mode==="collect")answer({item:v}); else answer(matchAnswer(v,currentQ));});
 
 /* ---------- wake word ---------- */
@@ -472,128 +500,243 @@ function stopWake(){if(wakeRec){const r=wakeRec;wakeRec=null;try{r.abort()}catch
 wakeChk.addEventListener("change",()=>{if(wakeChk.checked)startWake();else{stopWake();if(!running)setState("idle","Ready");}});
 
 /* ---------- remote control: lets the morning brief drive Alfred ---------- */
-const answers={}; let remoteReady=false, remoteBusy=false;
+const answers={}, drafts={}; let remoteReady=false, remoteBusy=false, backAllowed=false;
 const STOPW=new Set(["the","and","for","with","from","it's","its","this","that","your","you","my","in","of","to","a","an"]);
 const bridge=document.createElement("pre"); bridge.id="alfredBridge"; bridge.hidden=true; document.body.appendChild(bridge);
 function publishBridge(){bridge.textContent=JSON.stringify({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok",batch:(typeof batch!=="undefined"?batch:null),answers});}
 function toQ(r){return{meta:r.meta,text:String(r.text||""),opts:(r.options||[]).map(l=>{l=String(l);const low=l.toLowerCase();
   const words=low.replace(/[^a-z0-9' ]/g," ").split(/\s+/).filter(w=>w&&(w.length>2||w==="no")&&!STOPW.has(w));return[l,[low,...words],l];})};}
+function setBack(on){backAllowed=!!on; $("backBtn").disabled=!running||!backAllowed;}
 async function remoteAsk(r,inBatch){
   if(!inBatch){remoteBusy=true; publishBridge();} const q=toQ(r); let a;
   do{ a=await ask(q); }while(a&&a.cmd==="repeat"&&running);
+  if(a&&a.cmd==="back"){ if(!inBatch){remoteBusy=false;publishBridge();} return{kind:"back"}; }
   let out;
   if(!a||a.cmd==="stop")out={kind:"stopped"};
   else if(a.cmd==="skip")out={kind:"skip"};
   else if(a.opt!=null){out={kind:"option",index:a.opt,label:q.opts[a.opt][0]};[...optsEl.children].forEach((b,i)=>b.classList.toggle("chosen",i===a.opt));}
   else out={kind:"other",text:a.other};
-  answers[r.id]=out;
-  addLog(out.kind==="option"?esc(out.label)+" <span>— "+esc(q.text.slice(0,70))+(q.text.length>70?"…":"")+"</span>":out.kind==="other"?"<span>Your own answer:</span> “"+esc(out.text)+"”":"<span>"+out.kind+"</span>");
+  if(out.kind!=="stopped")answers[r.id]=out;
+  if(!inBatch)addLog(out.kind==="option"?esc(out.label)+" <span>— "+esc(q.text.slice(0,70))+(q.text.length>70?"…":"")+"</span>":out.kind==="other"?"<span>Your own answer:</span> “"+esc(out.text)+"”":"<span>"+out.kind+"</span>");
   if(!inBatch)remoteBusy=false; publishBridge();
   if(out.kind!=="stopped")await speak(ACKS[Math.floor(Math.random()*ACKS.length)]);
   if(running&&!inBatch)setState("idle","Waiting for your instruction");
   return out;
 }
-let batch={total:0,asked:0,done:false};
+
+/* ---------- batch: questions in order, Back to the previous one, then a review screen ---------- */
+let batch={total:0,asked:0,done:false,reviewing:false};
+function labelFor(r){const t=String(r.label||r.text||"").replace(/^.*?(First:|First,)\s*/i,"");return t.length>90?t.slice(0,88)+"…":t;}
+function summaryFor(r){
+  const a=answers[r.id]; if(!a)return"(not answered)";
+  if(a.kind==="option"){let s=a.label;const fu=r.followUps&&r.followUps[a.index];
+    if(fu&&answers[fu.id]){const b=answers[fu.id];s+=" → "+(b.kind==="option"?b.label:b.kind==="other"?b.text:b.kind);}return s;}
+  if(a.kind==="other")return"“"+a.text+"”";
+  if(a.kind==="free")return a.text?"“"+(a.text.length>160?a.text.slice(0,158)+"…":a.text)+"”":"(nothing said)";
+  if(a.kind==="list")return a.items.length?a.items.join(" · "):"(nothing new)";
+  if(a.kind==="skip")return"(skipped)";
+  return a.kind;
+}
+function renderBatchLog(list){
+  logStarted=true; logEl.innerHTML="";
+  list.forEach((r,i)=>{if(!answers[r.id])return;const li=document.createElement("li");
+    li.innerHTML="<span>"+esc(labelFor(r).slice(0,60))+":</span> "+esc(summaryFor(r));logEl.appendChild(li);});
+  if(!logEl.children.length)logEl.innerHTML="<li><span>Your answers go back to Claude, which updates To Do.</span></li>";
+}
+async function runItem(r,i,list,fromReview){
+  r.meta=r.meta||("Question "+(i+1)+" of "+list.length);
+  setBack(i>0||fromReview);
+  const out=r.type==="free"?await remoteFree(r):r.type==="collect"?await remoteCollect(r):await remoteAsk(r,true);
+  if(!out||out.kind==="stopped")return"stopped";
+  if(out.kind==="back")return"back";
+  if(r.followUps)for(const k in r.followUps){if(!(out.kind==="option"&&String(out.index)===k))delete answers[r.followUps[k].id];}
+  const fu=r.followUps&&out.kind==="option"&&r.followUps[out.index];
+  if(fu&&running){fu.meta=(r.meta||"")+" · follow-up"; setBack(true);
+    const o2=await remoteAsk(fu,true); if(!o2||o2.kind==="stopped")return"stopped"; if(o2.kind==="back")return"redo";}
+  renderBatchLog(list); publishBridge(); return"ok";
+}
+const WORDNUM={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15};
+async function review(list){
+  batch.reviewing=true; publishBridge(); setBack(false); stopRecUI();
+  currentQ={mode:"review",opts:[]};
+  qmeta.textContent="Check your answers";
+  qEl.textContent="Here's what I have. Tap any answer to change it or add more, or press All good.";
+  optsEl.innerHTML=""; typed.hidden=true;
+  list.forEach((r,i)=>{const b=document.createElement("button");b.type="button";b.className="opt review";
+    b.innerHTML='<span class="n">'+(i+1)+'</span><span class="rv"><span class="ql"></span><span class="ans"></span></span><span class="say">change</span>';
+    b.querySelector(".ql").textContent=labelFor(r); b.querySelector(".ans").textContent=summaryFor(r);
+    b.addEventListener("click",()=>answer({opt:i})); optsEl.appendChild(b);});
+  const ok=document.createElement("button");ok.type="button";ok.className="primary";ok.textContent="All good – finish";
+  ok.addEventListener("click",()=>answer({confirm:true})); optsEl.appendChild(ok);
+  const got=new Promise(res=>pending=res); const mine=pending;
+  (async()=>{
+    await speak("That's everything. Check your answers on screen. Say all good to finish, or say change, and the number.");
+    let last=Date.now();
+    while(pending===mine&&running){
+      if(Date.now()-last>120000){await speak("I'll take that as all good.");answer({confirm:true});break;}
+      if(micBlocked){setState("idle","Waiting for you");await new Promise(r=>setTimeout(r,1000));continue;}
+      const x=await listenOnce(8000); if(pending!==mine)break;
+      if(x.err&&blocking(x.err)){micUnavailable("blocked");continue;}
+      const t=" "+(x.text||"").toLowerCase()+" "; if(!t.trim())continue; last=Date.now();
+      if(/\b(all good|all correct|that's right|that is right|correct|finish|looks right|looks good|fine|yes)\b/.test(t)){answer({confirm:true});break;}
+      const m=t.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\b/);
+      if(m){const n=WORDNUM[m[1]]||parseInt(m[1],10); if(n>=1&&n<=list.length){answer({opt:n-1});break;}}
+      if(/reflection|how the day went/.test(t)){const k=list.findIndex(r=>r.type==="free");if(k>=0){answer({opt:k});break;}}
+      if(/new items?|add more|my list/.test(t)){const k=list.findIndex(r=>r.type==="collect");if(k>=0){answer({opt:k});break;}}
+      await speak("Say all good, or change and the number."); if(pending!==mine)break;
+    }
+  })();
+  const a=await got; batch.reviewing=false; publishBridge();
+  if(!a||a.cmd==="stop")return"stopped";
+  if(a.opt!=null)return a.opt;
+  return -1;
+}
 async function remoteRunAll(list){
-  remoteBusy=true; batch={total:list.length,asked:0,done:false}; publishBridge();
-  for(let i=0;i<list.length&&running;i++){
-    const r=list[i]; r.meta=r.meta||("Question "+(i+1)+" of "+list.length);
-    const out=r.type==="free"?await remoteFree(r):r.type==="collect"?await remoteCollect(r):await remoteAsk(r,true); batch.asked=i+1;
-    if(!out||out.kind==="stopped")break;
-    const fu=r.followUps&&out.kind==="option"&&r.followUps[out.index];
-    if(fu&&running){fu.meta=r.meta+" · follow-up"; const o2=await remoteAsk(fu,true); if(!o2||o2.kind==="stopped")break;}
-    publishBridge();
+  remoteBusy=true; batch={total:list.length,asked:0,done:false,reviewing:false}; publishBridge();
+  let i=0, stopped=false;
+  while(i<list.length&&running){
+    const res=await runItem(list[i],i,list,false);
+    if(res==="stopped"){stopped=true;break;}
+    if(res==="back"){i=Math.max(0,i-1);continue;}
+    if(res==="redo")continue;
+    i++; batch.asked=Math.max(batch.asked,i); publishBridge();
   }
+  while(!stopped&&running&&list.length>1){
+    const pick=await review(list);
+    if(pick==="stopped"){stopped=true;break;}
+    if(pick<0)break;
+    let res; do{res=await runItem(list[pick],pick,list,true);}while(res==="redo"&&running);
+    if(res==="stopped"){stopped=true;break;}
+  }
+  setBack(false); stopRecUI();
   batch.done=true; remoteBusy=false; publishBridge();
-  if(running){qmeta.textContent="Finished";qEl.textContent=list.closing||"That's everything. Updating To Do now.";optsEl.innerHTML="";typed.hidden=true;setState("idle","Updating To Do");await speak("That's everything. I'll update To Do now.");}
+  if(running&&!stopped){qmeta.textContent="Finished";qEl.textContent=list.closing||"That's everything. Updating To Do now.";optsEl.innerHTML="";typed.hidden=true;setState("idle","Updating To Do");await speak("Thank you. I'll update To Do now.");}
 }
 function wakeRemote(){
   remoteReady=true; running=true; logStarted=false; stopWake();
-  $("startBtn").disabled=true; $("stopBtn").disabled=false; $("skipBtn").disabled=false; $("repeatBtn").disabled=false;
+  $("startBtn").disabled=true; $("stopBtn").disabled=false; $("skipBtn").disabled=false; $("repeatBtn").disabled=false; setBack(false);
   if(!SR)micUnavailable("unsupported");
   publishBridge();
   speak("Ready when you are, Phil.").then(()=>{ if(!micBlocked&&!remoteBusy) listenOnce(1200).then(r=>{ if(r&&r.err&&/not-allowed|service-not-allowed|audio-capture/.test(r.err))micUnavailable("blocked"); publishBridge(); if(!remoteBusy)setState("idle","Waiting for your instruction"); }); });
 }
 
-/* ---------- free-form reflection and "what's new?" collection ---------- */
-let finishLongNow=false;
-const END_RE=/\b(that's all|that is all|that's it|nothing else|no more|end of reflection|i'm done|finished)\b/i;
-function listenLong(maxMs,silenceMs){
-  return new Promise(res=>{
-    if(micBlocked){res({err:"blocked"});return;}
-    finishLongNow=false;
-    const r=new SR(); currentRec=r; r.lang="en-GB"; r.continuous=true; r.interimResults=true;
-    let fin="",inter="",over=false,lastHeard=Date.now(),started=false;
-    const all=()=>(fin+" "+inter).replace(/\s+/g," ").trim();
-    const finish=v=>{if(over)return;over=true;clearInterval(iv);clearTimeout(t);try{r.abort()}catch(e){}if(currentRec===r)currentRec=null;res(v);};
-    const t=setTimeout(()=>finish({text:all()}),maxMs);
-    const iv=setInterval(()=>{
-      if(finishLongNow)finish({text:all()});
-      else if(started&&Date.now()-lastHeard>silenceMs)finish({text:all()});
-      else if(!started&&Date.now()-lastHeard>12000)finish({text:""});
-    },250);
-    r.onresult=e=>{started=true;lastHeard=Date.now();inter="";
-      for(let i=e.resultIndex;i<e.results.length;i++){const x=e.results[i][0].transcript;if(e.results[i].isFinal)fin+=(fin?" ":"")+x.trim();else inter+=x;}
-      showHeard(all(),!!inter);
-      if(END_RE.test(fin))finish({text:fin.replace(END_RE,"").replace(/[\s,.]+$/,"").trim(),ended:true});};
-    r.onerror=e=>{if(e.error==="no-speech"||e.error==="aborted")return;finish({err:e.error,text:all()});};
-    r.onend=()=>{if(!over){try{r.start()}catch(e){finish({text:all()})}}};
-    try{r.start();setState("listening","Listening");}catch(e){finish({err:"start-failed"});}
-  });
+/* ---------- recorder: keeps listening through pauses until you press Pause, That's all, Back or Skip ---------- */
+const END_FREE=/\b(that's all|that is all|end of reflection)\b/i;
+const END_COLLECT=/\b(that's all|that is all|that's it|nothing else|no more)\b/i;
+let longCtl=null;
+const recBox=$("recBox"),recLabel=$("recLabel"),recBtn=$("recBtn"),recDone=$("recDone"),freeText=$("freeText"),collectLive=$("collectLive");
+function makeRecorder(o){
+  const st={fin:o.initial||"",inter:"",paused:false,started:false,dead:false,r:null,last:Date.now(),heard:false};
+  const all=()=>(st.fin+" "+st.inter).replace(/\s+/g," ").trim();
+  const commit=()=>{if(st.inter.trim())st.fin=(st.fin+" "+st.inter).replace(/\s+/g," ").trim();st.inter="";};
+  const upd=()=>{o.onUpdate&&o.onUpdate(all());setRecUI();};
+  function startSR(){
+    if(st.dead||st.paused||micBlocked||st.r)return;
+    const r=new SR(); st.r=r; currentRec=r; r.lang="en-GB"; r.continuous=true; r.interimResults=true;
+    r.onresult=e=>{ if(st.r!==r)return; st.heard=true; st.last=Date.now(); st.inter="";
+      for(let i=e.resultIndex;i<e.results.length;i++){const x=e.results[i][0].transcript; if(e.results[i].isFinal)st.fin=(st.fin+" "+x.trim()).trim(); else st.inter+=x;}
+      upd();
+      if(o.endRe&&o.endRe.test(st.fin)){st.fin=st.fin.replace(o.endRe," ").replace(/\s+/g," ").replace(/[\s,.]+$/,"").trim();st.inter="";upd();o.onEnd&&o.onEnd();}
+    };
+    r.onerror=e=>{ if(/not-allowed|service-not-allowed|audio-capture/.test(e.error)){micUnavailable("blocked");st.paused=true;upd();} };
+    r.onend=()=>{ if(st.r!==r)return; st.r=null; if(currentRec===r)currentRec=null; commit(); upd(); if(!st.dead&&!st.paused&&!micBlocked)setTimeout(startSR,200); };
+    try{r.start();}catch(e){st.r=null;}
+  }
+  const stopSR=()=>{const r=st.r; st.r=null; if(r){try{r.abort()}catch(e){}} if(currentRec===r)currentRec=null; commit();};
+  const iv=setInterval(()=>{ if(st.dead||st.paused||!st.started)return;
+    if(o.silenceMs&&st.heard&&Date.now()-st.last>o.silenceMs){st.heard=false;commit();o.onSilence&&o.onSilence();} },250);
+  const c={
+    start(){st.started=true;st.last=Date.now();startSR();upd();},
+    pause(){st.paused=true;stopSR();upd();},
+    resume(){if(micBlocked)return;st.paused=false;st.last=Date.now();if(st.started)startSR();upd();},
+    get paused(){return st.paused;}, get started(){return st.started;},
+    idleMs(){return(st.paused||!st.started)?0:Date.now()-st.last;},
+    text:()=>all(), setText(t){st.fin=t;st.inter="";}, clear(){st.fin="";st.inter="";upd();},
+    kill(){if(st.dead)return;st.dead=true;clearInterval(iv);stopSR();}
+  };
+  return c;
 }
-function renderPlain(r,mode,items){
+function setRecUI(){
+  const c=longCtl; if(!c){recBox.hidden=true;return;}
+  recBox.hidden=false;
+  const on=c.started&&!c.paused&&!micBlocked;
+  recBox.classList.toggle("on",on);
+  recLabel.textContent=micBlocked?"Microphone off – type instead":!c.started?"Recording starts when Alfred stops talking":c.paused?"Paused – press Resume when you're ready":"Recording – take your time";
+  recBtn.textContent=c.paused?"● Resume":"❚❚ Pause"; recBtn.disabled=micBlocked;
+  if(c.started)setState(on?"listening":"idle",on?"Recording":"Paused");
+}
+function stopRecUI(){if(longCtl){longCtl.kill();longCtl=null;}recBox.hidden=true;freeText.oninput=null;}
+recBtn.addEventListener("click",()=>{const c=longCtl;if(!c)return;if(c.paused)c.resume();else c.pause();});
+recDone.addEventListener("click",()=>{const c=longCtl;if(!c||!currentQ)return;
+  if(currentQ.mode==="collect"){const t=c.text();answer(t?{item:t,end:true}:{end:true});} else answer({done:true});});
+
+function renderPlain(r,mode,items,onRemove){
   currentQ={mode,meta:r.meta,text:r.text,opts:[]};
   qmeta.textContent=r.meta||"Alfred"; qEl.textContent=r.text; optsEl.innerHTML="";
-  if(items&&items.length){const ul=document.createElement("ol");ul.style.margin="0";ul.style.paddingLeft="1.2em";
-    items.forEach(it=>{const li=document.createElement("li");li.textContent=it;ul.appendChild(li);});optsEl.appendChild(ul);}
-  const b=document.createElement("button");b.type="button";b.className="opt";
-  b.innerHTML='<span class="n">✓</span><span>That\'s all</span><span class="say">say “that\'s all”</span>';
-  b.addEventListener("click",()=>{finishLongNow=true;if(!currentRec)answer(mode==="free"?{free:typedInput.value.trim()}:{end:true});});
-  optsEl.appendChild(b);
-  typed.hidden=false; typedInput.value=""; typedInput.placeholder=mode==="free"?"Or type your thoughts":"Or type a new item";
+  if(items&&items.length){const ul=document.createElement("ol");ul.className="items";
+    items.forEach((it,k)=>{const li=document.createElement("li");const s=document.createElement("span");s.textContent=it;li.appendChild(s);
+      if(onRemove){const x=document.createElement("button");x.type="button";x.className="item-x";x.textContent="✕";x.title="Remove";x.addEventListener("click",()=>onRemove(k));li.appendChild(x);}
+      ul.appendChild(li);});optsEl.appendChild(ul);}
+  freeText.hidden=mode!=="free"; collectLive.hidden=mode!=="collect"; collectLive.textContent="";
+  recDone.textContent=mode==="free"?"✓ That's all":"✓ That's all – no more";
+  typed.hidden=mode==="free"; typedInput.value=""; typedInput.placeholder="Or type a new item";
 }
 function blocking(err){return err&&/not-allowed|service-not-allowed|audio-capture|start-failed/.test(err);}
 async function remoteFree(r){
-  renderPlain(r,"free");
-  const got=new Promise(res=>pending=res);
-  (async()=>{
-    await speak(r.text); if(!pending)return;
-    if(!micBlocked){const x=await listenLong(r.maxMs||120000,4500); if(!pending)return;
-      if(blocking(x.err))micUnavailable("blocked"); else {answer({free:x.text||""});return;}}
-    setState("idle","Waiting for your answer");
-  })();
-  const a=await got;
-  const out=a&&a.cmd==="stop"?{kind:"stopped"}:a&&a.cmd==="skip"?{kind:"skip"}:{kind:"free",text:(a&&a.free)||""};
-  answers[r.id]=out;
-  if(out.kind==="free")addLog("<span>Reflection:</span> "+(out.text?"“"+esc(out.text.slice(0,140))+(out.text.length>140?"…":"")+"”":"(nothing said)"));
-  publishBridge(); if(out.kind!=="stopped")await speak("Thank you. Noted.");
-  return out;
+  let retried=false;
+  while(true){
+    const had=!!(drafts[r.id]&&drafts[r.id].trim());
+    renderPlain(r,"free");
+    const c=makeRecorder({initial:drafts[r.id]||"",endRe:END_FREE,onEnd:()=>answer({done:true}),
+      onUpdate:t=>{if(document.activeElement!==freeText)freeText.value=t;}});
+    longCtl=c; freeText.value=drafts[r.id]||""; freeText.oninput=()=>c.setText(freeText.value); setRecUI();
+    const got=new Promise(res=>pending=res); const mine=pending;
+    (async()=>{
+      const line=retried?"I didn't catch anything. I'm still listening. Take your time, and say that's all when you've finished."
+        :had?r.text+" I've kept what you said before. Carry on, and say that's all when you've finished.":r.text;
+      await speak(line); if(pending!==mine)return;
+      c.start();
+    })();
+    const a=await got; const text=c.text().trim(); stopRecUI();
+    drafts[r.id]=text;
+    if(a&&a.cmd==="back")return{kind:"back"};
+    if(!a||a.cmd==="stop"){publishBridge();return{kind:"stopped"};}
+    if(a.cmd==="skip"){answers[r.id]={kind:"skip"};publishBridge();return answers[r.id];}
+    if(!text&&!retried&&!micBlocked){retried=true;continue;}
+    const out={kind:"free",text}; answers[r.id]=out; publishBridge();
+    await speak(text?"Thank you. Noted.":"Nothing recorded. Moving on.");
+    return out;
+  }
 }
 async function remoteCollect(r){
-  const items=[]; let tries=0;
-  while(running&&items.length<15){
-    const prompt=items.length?(r.again||"Anything else?"):r.text;
-    renderPlain(Object.assign({},r,{text:prompt}),"collect",items);
-    const got=new Promise(res=>pending=res);
+  const items=(drafts[r.id]||[]).slice(); let first=true, quiet=0, endAll=false, result=null;
+  while(running&&items.length<25&&!endAll){
+    const prompt=first?(items.length?"Here's your list so far. Add more, or say that's all.":r.text):(r.again||"Anything else?");
+    first=false;
+    const rerender=()=>renderPlain(Object.assign({},r,{text:prompt}),"collect",items,k=>{items.splice(k,1);drafts[r.id]=items.slice();rerender();setRecUI();});
+    rerender();
+    const c=makeRecorder({silenceMs:3000,endRe:END_COLLECT,
+      onSilence:()=>{const t=c.text();if(t)answer({item:t});},
+      onEnd:()=>{const t=c.text();answer(t?{item:t,end:true}:{end:true});},
+      onUpdate:t=>{collectLive.textContent=t?"Heard: “"+t+"”":"";}});
+    longCtl=c; setRecUI();
+    const got=new Promise(res=>pending=res); const mine=pending;
     (async()=>{
-      await speak(prompt); if(!pending)return;
-      if(!micBlocked){const x=await listenLong(45000,3000); if(!pending)return;
-        if(blocking(x.err)){micUnavailable("blocked");setState("idle","Waiting for your answer");return;}
-        if(x.ended&&!x.text){answer({end:true});return;}
-        if(x.text){answer(x.ended?{item:x.text,end:true}:{item:x.text});return;}
-        answer({silent:true});return;}
-      setState("idle","Waiting for your answer");
+      await speak(prompt); if(pending!==mine)return; c.start();
+      while(pending===mine){await new Promise(z=>setTimeout(z,500)); if(pending===mine&&c.idleMs()>25000&&!c.text())answer({silent:true});}
     })();
-    const a=await got;
-    if(!a||a.cmd==="stop")break;
+    const a=await got; stopRecUI();
+    if(a&&a.cmd==="back"){drafts[r.id]=items.slice();return{kind:"back"};}
+    if(!a||a.cmd==="stop"){drafts[r.id]=items.slice();return{kind:"stopped"};}
     if(a.cmd==="skip")break;
-    if(a.silent){tries++; if(tries>=2)break; continue;}
-    tries=0;
-    if(a.item){items.push(a.item);addLog("<span>New item:</span> "+esc(a.item));publishBridge();}
-    if(a.end)break;
+    if(a.silent){quiet++; if(quiet>=2)break; continue;}
+    quiet=0;
+    if(a.item){items.push(a.item);drafts[r.id]=items.slice();answers[r.id]={kind:"list",items:items.slice()};publishBridge();}
+    if(a.end){endAll=true;break;}
     await speak("Got it.");
   }
-  const out={kind:"list",items}; answers[r.id]=out; publishBridge();
+  drafts[r.id]=items.slice();
+  const out={kind:"list",items:items.slice()}; answers[r.id]=out; publishBridge();
   await speak(items.length?("I have "+items.length+" new item"+(items.length>1?"s":"")+"."):"Nothing new. Fine.");
   return out;
 }
@@ -614,7 +757,7 @@ if(REMOTE){
   heard.textContent="Click Wake Alfred, then allow the microphone.";
   qmeta.textContent="Alfred";
   qEl.textContent="Waiting for your instruction. Keep this tab open.";
-  $("hint").textContent="Say the answer or its number. Say “repeat” to hear it again, or “skip”. Tapping and typing also work.";
+  $("hint").textContent="Say the answer or its number. Say “repeat”, “skip” or “go back”. Tapping and typing also work. You can change any answer on the review screen at the end.";
   logEl.innerHTML='<li><span>Your answers go back to Claude, which updates To Do.</span></li>';
   publishBridge();
 }
