@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>[hidden]{display:none!important}body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
+<title>Alfred Desk Assistant</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: a two-pane desk — Alfred on a lit stage at left, the conversation panel at right; stacks on phones. */
+:root{
+  --bg:#EEF1F4; --surface:#FFFFFF; --ink:#18202B; --muted:#5B6675; --line:#D5DBE3;
+  --accent:#E09A12; --accent-ink:#2A1C00; --listen:#1F8A70; --danger:#B4412F;
+  --stage:#F4ECDD; --stage-glow:#FBF6EC; --stage-ink:#2D2620; --stage-muted:#6B5E50; --stage-dot:#CBBFA9;
+  --alf-line:#3B2F2A; --alf-skin:#EFC7A4; --alf-skin-shade:#E2AE8A; --alf-skin-line:#C48B68; --alf-cheek:#E39C80;
+  --alf-hair:#C9CDD2; --alf-hair-hi:#E6E8EB; --alf-hair-shade:#A3A9B1; --alf-brow:#8E959E; --alf-eye:#2B2422; --alf-glint:#FFFFFF;
+  --alf-lens:rgba(255,255,255,.14); --alf-frame:#7A5A34; --alf-mouth:#5B2C2A; --alf-tongue:#D7686A;
+  --alf-shirt:#F7F3EC; --alf-tweed:#4B4A4D; --alf-tweed-hi:#5E5C5F; --alf-tie:#2F5A3D; --alf-brass:#C49A45; --alf-brass-dark:#7E5E24;
+  --alf-metal:#AEB8C2; --alf-metal-hi:#E4E9EE; --alf-metal-shade:#7F8B97; --alf-panel:#1D2830; --alf-panel-hi:#3A4A55; --alf-led:#7FF0DE; --alf-led-dim:#2C8F82;
+  --alf-tablet:#2E343B; --alf-screen:#9CC0CF; --alf-screen-ink:#4F7586; --alf-mug:#EAE2D2; --alf-tea:#8A5A3B; --alf-steam:#C9BBA6;
+  --display:"Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body:"Atkinson Hyperlegible", "Helvetica Neue", Arial, system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11161D; --surface:#19212B; --ink:#E9EEF4; --muted:#9AA6B5; --line:#2C3644;
+  --accent:#F2B13A; --accent-ink:#241800; --listen:#3CC39F; --danger:#E5735F;
+  color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#11161D; --surface:#19212B; --ink:#E9EEF4; --muted:#9AA6B5; --line:#2C3644;
+  --accent:#F2B13A; --accent-ink:#241800; --listen:#3CC39F; --danger:#E5735F;
+  color-scheme:dark }
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px}
+.app{max-width:980px;margin:0 auto;display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:20px}
+@media (max-width:760px){.app{grid-template-columns:minmax(0,1fr)}}
+header.top{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 16px}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(1.6rem,3.5vw,2.2rem);letter-spacing:-.01em;margin:0;text-wrap:balance}
+.tag{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.stage{color:var(--stage-ink);background:radial-gradient(120% 80% at 50% 30%,var(--stage-glow),var(--stage));border-radius:28px;padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px;min-width:0}
+#alfred{width:100%;max-width:280px;height:auto;display:block}
+#head{transform-box:view-box;transform-origin:120px 210px;transition:transform .25s ease}
+.stage.speaking #head{animation:bob 1.6s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:rotate(-.8deg) translateY(0)}50%{transform:rotate(.8deg) translateY(-1.5px)}}
+#antennaLight{fill:#FFF1C2;transition:fill .2s}
+#browL,#browR{transition:transform .25s ease}
+.stage.listening #browL{transform:translateY(-4px) rotate(-8deg);transform-box:fill-box;transform-origin:center}
+
+.stage.listening #antennaLight{fill:#3CC39F;animation:pulse 1s ease-in-out infinite}
+.stage.speaking #antennaLight{fill:#FFB020}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.stage.speaking #head,.stage.listening #antennaLight{animation:none}}
+.status{display:flex;align-items:center;gap:8px;font-weight:700;font-size:.95rem}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--stage-dot)}
+.stage.speaking .dot{background:#D98E04} .stage.listening .dot{background:#1F8A70}
+.heard{min-height:1.5em;color:var(--stage-muted);font-size:.95rem;text-align:center;max-width:100%;overflow-wrap:anywhere}
+.heard.interim{font-style:italic}
+.controls{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+button{font:inherit;cursor:pointer;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 14px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+button:disabled{opacity:.45;cursor:default}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.qmeta{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-variant-numeric:tabular-nums}
+.question{font-family:var(--display);font-weight:600;font-size:clamp(1.25rem,2.6vw,1.6rem);line-height:1.25;margin:0;text-wrap:balance}
+.options{display:grid;gap:8px}
+.opt{display:flex;align-items:center;gap:12px;text-align:left;padding:12px 14px;border-radius:14px}
+.opt .n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--bg);font-weight:700;font-variant-numeric:tabular-nums}
+.opt .say{margin-left:auto;font-size:.8rem;color:var(--muted)}
+.opt.chosen{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+form.typed{display:flex;gap:8px}
+form.typed input{flex:1;min-width:0;font:inherit;padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.hint{font-size:.85rem;color:var(--muted);margin:0}
+.notice{font-size:.85rem;border-left:3px solid var(--accent);padding:6px 10px;background:var(--bg);border-radius:0 8px 8px 0}
+.log{border-top:1px solid var(--line);padding-top:12px}
+.log h2{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;font-weight:700}
+.log ol{margin:0;padding-left:1.2em;display:grid;gap:4px;font-size:.92rem}
+.log li span{color:var(--muted)}
+.settings{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;font-size:.88rem;color:var(--muted)}
+.settings select{font:inherit;max-width:100%;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.settings label{display:flex;align-items:center;gap:6px}
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1>Alfred, your desk assistant</h1>
+    <span class="tag">Demo · sample questions · nothing is saved</span>
+  </header>
+
+  <section class="stage" id="stage" aria-label="Alfred the assistant">
+    <svg id="alfred" viewBox="0 0 240 260" role="img" aria-label="Alfred, a polished steel robot in round brass spectacles, a tweed waistcoat and green tie, holding a tablet and a mug of tea">
+      <defs>
+        <pattern id="tweed" width="5" height="5" patternUnits="userSpaceOnUse">
+          <rect width="5" height="5" fill="var(--alf-tweed)"/>
+          <path d="M0 5L5 0" stroke="var(--alf-tweed-hi)" stroke-width="1"/>
+        </pattern>
+        <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="var(--alf-metal-hi)"/>
+          <stop offset=".55" stop-color="var(--alf-metal)"/>
+          <stop offset="1" stop-color="var(--alf-metal-shade)"/>
+        </linearGradient>
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="1.8" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <g id="head">
+        <!-- torso -->
+        <path d="M46 262C48 218 76 198 120 196C164 198 192 218 194 262Z" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="2"/>
+        <path d="M104 196L118 211L110 219Z" fill="var(--alf-shirt)" stroke="var(--alf-line)" stroke-width="1.8" stroke-linejoin="round"/>
+        <path d="M136 196L122 211L130 219Z" fill="var(--alf-shirt)" stroke="var(--alf-line)" stroke-width="1.8" stroke-linejoin="round"/>
+        <path d="M115 210L126 209L124 219L117 220Z" fill="var(--alf-tie)" stroke="var(--alf-line)" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M117 220L124 219L130 244L121 254L112 244Z" fill="var(--alf-tie)" stroke="var(--alf-line)" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M62 262C64 228 82 208 104 202L119 240L112 262Z" fill="url(#tweed)" stroke="var(--alf-line)" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M178 262C176 228 158 208 136 202L121 240L128 262Z" fill="url(#tweed)" stroke="var(--alf-line)" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="120" cy="246" r="2.4" fill="var(--alf-brass)"/>
+        <circle cx="120" cy="256" r="2.4" fill="var(--alf-brass)"/>
+        <g transform="translate(92 222) rotate(-12)">
+          <rect x="-6" y="-6" width="12" height="12" rx="3" fill="var(--alf-brass)" stroke="var(--alf-brass-dark)" stroke-width="1.3"/>
+          <path d="M-3.5 -2.5H-1V2.5H3.5M1 -3.5V-1H3.5" stroke="var(--alf-brass-dark)" stroke-width="1.1" fill="none"/>
+        </g>
+        <!-- neck -->
+        <rect x="104" y="172" width="32" height="26" rx="6" fill="var(--alf-metal-shade)" stroke="var(--alf-line)" stroke-width="2"/>
+        <path d="M104 180H136M104 188H136" stroke="var(--alf-line)" stroke-width="1.4" opacity=".5"/>
+        <!-- left arm + tablet -->
+        <path d="M40 262L56 236L74 242L62 262Z" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="52" cy="252" r="3" fill="var(--alf-metal-shade)" stroke="var(--alf-line)" stroke-width="1.2"/>
+        <g transform="rotate(-10 56 228)">
+          <rect x="34" y="198" width="44" height="60" rx="6" fill="var(--alf-tablet)" stroke="var(--alf-line)" stroke-width="2"/>
+          <rect x="39" y="203" width="34" height="48" rx="3" fill="var(--alf-screen)"/>
+          <path d="M43 211H67M43 218H62M43 225H66M43 232H58" stroke="var(--alf-screen-ink)" stroke-width="2" stroke-linecap="round"/>
+        </g>
+        <rect x="64" y="232" width="15" height="11" rx="5" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="1.8"/>
+        <!-- right arm + mug -->
+        <path d="M200 262L186 238L168 242L178 262Z" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="188" cy="252" r="3" fill="var(--alf-metal-shade)" stroke="var(--alf-line)" stroke-width="1.2"/>
+        <path d="M200 218C211 218 211 236 200 236" fill="none" stroke="var(--alf-line)" stroke-width="5"/>
+        <path d="M200 218C209 218 209 236 200 236" fill="none" stroke="var(--alf-mug)" stroke-width="2.4"/>
+        <rect x="168" y="208" width="34" height="36" rx="5" fill="var(--alf-mug)" stroke="var(--alf-line)" stroke-width="2"/>
+        <rect x="168" y="222" width="34" height="6" fill="var(--alf-tie)"/>
+        <ellipse cx="185" cy="209" rx="15" ry="3.2" fill="var(--alf-tea)" stroke="var(--alf-line)" stroke-width="1.6"/>
+        <path d="M179 202C175 196 183 193 179 186M190 203C186 196 194 192 190 184" fill="none" stroke="var(--alf-steam)" stroke-width="2" stroke-linecap="round"/>
+        <rect x="161" y="228" width="15" height="11" rx="5" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="1.8"/>
+        <!-- antenna (status light) -->
+        <path d="M120 46V22" stroke="var(--alf-line)" stroke-width="5" stroke-linecap="round"/>
+        <path d="M120 46V22" stroke="var(--alf-metal)" stroke-width="2.4" stroke-linecap="round"/>
+        <circle cx="120" cy="16" r="9" fill="var(--alf-brass)" stroke="var(--alf-brass-dark)" stroke-width="1.6"/>
+        <circle id="antennaLight" cx="120" cy="16" r="5" filter="url(#glow)"/>
+        <!-- ear bolts -->
+        <rect x="34" y="96" width="20" height="44" rx="8" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="2"/>
+        <rect x="186" y="96" width="20" height="44" rx="8" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="2"/>
+        <circle cx="44" cy="118" r="5" fill="var(--alf-brass)" stroke="var(--alf-brass-dark)" stroke-width="1.4"/>
+        <circle cx="196" cy="118" r="5" fill="var(--alf-brass)" stroke="var(--alf-brass-dark)" stroke-width="1.4"/>
+        <!-- head shell -->
+        <rect x="48" y="42" width="144" height="136" rx="36" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="2.4"/>
+        <path d="M66 52C90 44 150 44 174 52" fill="none" stroke="var(--alf-metal-hi)" stroke-width="4" stroke-linecap="round" opacity=".9"/>
+        <path d="M88 44V60M152 44V60" stroke="var(--alf-line)" stroke-width="1.4" opacity=".35"/>
+        <g fill="var(--alf-metal-shade)" stroke="var(--alf-line)" stroke-width="1">
+          <circle cx="62" cy="60" r="2.6"/><circle cx="178" cy="60" r="2.6"/><circle cx="62" cy="162" r="2.6"/><circle cx="178" cy="162" r="2.6"/>
+        </g>
+        <!-- brows -->
+        <rect id="browL" x="78" y="70" width="32" height="6" rx="3" fill="var(--alf-metal-shade)" stroke="var(--alf-line)" stroke-width="1.4" transform="rotate(-8 94 73)"/>
+        <rect id="browR" x="130" y="72" width="32" height="6" rx="3" fill="var(--alf-metal-shade)" stroke="var(--alf-line)" stroke-width="1.4" transform="rotate(5 146 75)"/>
+        <!-- face screen -->
+        <rect x="64" y="82" width="112" height="84" rx="24" fill="var(--alf-panel)" stroke="var(--alf-line)" stroke-width="2"/>
+        <rect x="70" y="86" width="100" height="10" rx="5" fill="var(--alf-panel-hi)" opacity=".5"/>
+        <g id="eyes" filter="url(#glow)">
+          <ellipse id="eyeL" cx="96" cy="114" rx="7" ry="8" fill="var(--alf-led)"/>
+          <ellipse id="eyeR" cx="144" cy="114" rx="7" ry="8" fill="var(--alf-led)"/>
+        </g>
+        <circle cx="96" cy="114" r="15" fill="none" stroke="var(--alf-brass)" stroke-width="2.8"/>
+        <circle cx="144" cy="114" r="15" fill="none" stroke="var(--alf-brass)" stroke-width="2.8"/>
+        <path d="M111 112Q120 106 129 112" fill="none" stroke="var(--alf-brass)" stroke-width="2.6" stroke-linecap="round"/>
+        <g transform="translate(120 148) scale(.8)" filter="url(#glow)">
+          <path id="smile" d="M-18 -3Q0 9 18 -3" fill="none" stroke="var(--alf-led)" stroke-width="3.6" stroke-linecap="round"/>
+          <ellipse id="mouth" cx="0" cy="0" rx="18" ry="2" fill="var(--alf-led)" opacity="0"/>
+          <ellipse id="tongue" cx="0" cy="0" rx="0" ry="0" fill="var(--alf-led-dim)"/>
+        </g>
+      </g>
+    </svg>
+    <div class="status"><span class="dot"></span><span id="statusText">Ready</span></div>
+    <div class="heard" id="heard" aria-live="polite">Press Start, or turn on the wake word and say “Hey Alfred”.</div>
+    <div class="controls">
+      <button class="primary" id="startBtn">Start</button>
+      <button id="repeatBtn" disabled>Repeat</button>
+      <button id="skipBtn" disabled>Skip</button>
+      <button id="stopBtn" disabled>Stop</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div>
+      <div class="qmeta" id="qmeta">6 sample questions</div>
+      <p class="question" id="question">Alfred will talk you through an example to-do list, one question at a time. Answer by voice, by tapping, or by typing.</p>
+    </div>
+    <div class="options" id="options"></div>
+    <form class="typed" id="typed" hidden>
+      <input id="typedInput" type="text" placeholder="Or type a different answer" autocomplete="off">
+      <button type="submit">Answer</button>
+    </form>
+    <p class="hint" id="hint">Voice commands: say the answer, its number (“one”, “two”), “repeat” or “skip”.</p>
+    <div class="notice" id="micNotice" hidden></div>
+    <div class="settings">
+      <label for="voiceSel">Voice <select id="voiceSel"></select></label>
+      <label for="wakeChk"><input type="checkbox" id="wakeChk"> Wake word “Hey Alfred”</label>
+    </div>
+    <div class="log">
+      <h2>What Alfred would do</h2>
+      <ol id="log"><li><span>Answers appear here. In the real version these become To Do changes.</span></li></ol>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+const QUESTIONS=[
+ {text:"Good morning. You have six things in My Day. First one: draft the supplier review summary. Is it done?",
+  opts:[["Done",["done","yes","finished","complete"],"Mark ‘Draft the supplier review summary’ complete"],
+        ["Move to tomorrow",["tomorrow","later","move"],"Move ‘Draft the supplier review summary’ to tomorrow"],
+        ["Drop from My Day",["drop","remove","not today"],"Remove it from My Day (task kept)"]]},
+ {text:"Book the forklift service is two days overdue. What shall we do with it?",
+  opts:[["Do it today",["today","now","do it"],"Set ‘Book the forklift service’ due today, add to My Day"],
+        ["Pick a new date",["date","friday","monday","next week","new date"],"Re-date ‘Book the forklift service’"],
+        ["Delegate it",["delegate","pass","someone else","give"],"Move it to Waiting For with the person's name"]]},
+ {text:"The planning team wants a decision on Thursday's shift cover. Shall I add that to your list?",
+  opts:[["Add for today",["today","yes","add"],"Add ‘Decide Thursday shift cover’ due today"],
+        ["Add with no date",["no date","undated","sometime"],"Add ‘Decide Thursday shift cover’ with no date"],
+        ["Not mine",["not mine","no","ignore"],"Ignore the email"]]},
+ {text:"Your chase to the packaging supplier is sitting in drafts. Will you send it, or shall I delete it?",
+  opts:[["I'll send it",["send","keep","i will"],"Leave the chase draft for you to send"],
+        ["Delete the draft",["delete","bin","remove"],"Delete the chase draft"],
+        ["Already sorted",["sorted","received","already","done"],"Mark the waiting-for item complete"]]},
+ {text:"You have a ninety minute gap after lunch. Do you want it blocked for focus work?",
+  opts:[["Yes, block it",["yes","block","please"],"Block 13:30 to 15:00 as focus time"],
+        ["No thanks",["no","leave","don't"],"Leave the afternoon open"]]},
+ {text:"That's everything. My Day now has five items. Does that look right?",
+  opts:[["Looks right",["right","yes","good","fine","correct"],"Keep My Day as it is"],
+        ["Too much",["too much","drop","fewer","less"],"Drop the lowest-priority item from My Day"]]}
+];
+const ACKS=["Got it.","Done.","Noted.","Okay.","Right."];
+const NUMS={one:0,first:0,"1":0,two:1,second:1,"2":1,to:1,too:1,three:2,third:2,"3":2};
+
+const $=id=>document.getElementById(id);
+const stage=$("stage"),statusText=$("statusText"),heard=$("heard"),qEl=$("question"),qmeta=$("qmeta"),
+      optsEl=$("options"),typed=$("typed"),typedInput=$("typedInput"),logEl=$("log"),micNotice=$("micNotice"),
+      voiceSel=$("voiceSel"),wakeChk=$("wakeChk");
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const synth=window.speechSynthesis;
+
+const REMOTE=location.hash==="#remote"; let currentQ=null;
+let running=false, idx=0, pending=null, currentRec=null, micBlocked=!SR, voices=[], logStarted=false;
+
+/* ---------- mouth / lip sync ---------- */
+const SHAPES={rest:[18,2],A:[22,16],E:[26,8],O:[12,13],M:[20,1.2],F:[20,4.5],mid:[18,8]};
+function shapeFor(ch){
+  ch=ch.toLowerCase();
+  if("ah".includes(ch))return"A"; if("eiy".includes(ch))return"E"; if("ouwq".includes(ch))return"O";
+  if("mbp".includes(ch))return"M"; if("fv".includes(ch))return"F"; if(/[a-z]/.test(ch))return"mid"; return"rest";
+}
+let timeline=[], cur=[18,2], speaking=false;
+function schedule(text,startAt,msPerChar){
+  const out=[]; let t=startAt;
+  for(const ch of text){
+    const s=shapeFor(ch); const d=/[,.;:!?]/.test(ch)?msPerChar*3:msPerChar;
+    out.push({t,shape:s}); t+=d;
+  }
+  out.push({t,shape:"rest"}); return out;
+}
+const mouth=$("mouth"),tongue=$("tongue"),smile=$("smile");
+function frame(now){
+  let target=SHAPES.rest;
+  if(speaking&&timeline.length){
+    let s="rest"; for(const k of timeline){if(k.t<=now)s=k.shape;else break;}
+    target=SHAPES[s];
+  }
+  const jitter=speaking&&target[1]>3?(Math.sin(now/45)*1.2):0;
+  cur[0]+= (target[0]-cur[0])*0.35; cur[1]+= (target[1]+jitter-cur[1])*0.35;
+  const ry=Math.max(1,cur[1]); const resting=ry<2.8;
+  smile.setAttribute("opacity",resting?1:0); mouth.setAttribute("opacity",resting?0:1);
+  mouth.setAttribute("rx",cur[0].toFixed(2)); mouth.setAttribute("ry",ry.toFixed(2));
+  if(ry>5){tongue.setAttribute("rx",(cur[0]*.55).toFixed(2));tongue.setAttribute("ry",(ry*.38).toFixed(2));tongue.setAttribute("cy",(ry*.5).toFixed(2));}
+  else{tongue.setAttribute("rx",0);tongue.setAttribute("ry",0);}
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* blinking */
+const eyeL=$("eyeL"),eyeR=$("eyeR");
+const EYE_RY=eyeL.getAttribute("ry");
+function blink(){eyeL.setAttribute("ry",0.8);eyeR.setAttribute("ry",0.8);
+  setTimeout(()=>{eyeL.setAttribute("ry",EYE_RY);eyeR.setAttribute("ry",EYE_RY);},120);
+  setTimeout(blink,2500+Math.random()*3500);}
+setTimeout(blink,2000);
+
+/* ---------- voices ---------- */
+function loadVoices(){
+  if(!synth)return;
+  voices=synth.getVoices().filter(v=>/^en/i.test(v.lang));
+  const prev=voiceSel.value; voiceSel.innerHTML="";
+  const ranked=[...voices].sort((a,b)=>score(b)-score(a));
+  ranked.forEach(v=>{const o=document.createElement("option");o.value=v.name;o.textContent=v.name+" ("+v.lang+")";voiceSel.appendChild(o);});
+  if(prev&&ranked.some(v=>v.name===prev))voiceSel.value=prev;
+}
+const FEMALE=/serena|kate|martha|stephanie|moira|tessa|karen|samantha|fiona|victoria|allison|ava|susan|zoe|libby|sonia|hazel|maisie|female/i;
+const MALE=/daniel|oliver|arthur|alex|fred|tom|aaron|rishi|gordon|ryan|thomas|george|male\b/i;
+function score(v){return (MALE.test(v.name)&&!FEMALE.test(v.name)?10:0)-(FEMALE.test(v.name)?10:0)+(v.lang==="en-GB"?8:0)+(v.localService?3:0)+(/daniel|oliver|arthur/i.test(v.name)?2:0);}
+if(synth){loadVoices(); synth.onvoiceschanged=loadVoices;}
+
+function setState(s,label){stage.classList.toggle("speaking",s==="speaking");stage.classList.toggle("listening",s==="listening");statusText.textContent=label;}
+
+function speak(text){
+  return new Promise(resolve=>{
+    if(!synth){resolve();return;}
+    synth.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    const v=voices.find(v=>v.name===voiceSel.value); if(v){u.voice=v;u.lang=v.lang;} else u.lang="en-GB";
+    u.rate=1; let gotBoundary=false, fallbackTimer=null, finished=false;
+    const msPerChar=62;
+    const done=()=>{if(finished)return;finished=true;clearTimeout(fallbackTimer);clearTimeout(safety);speaking=false;timeline=[];setState("idle",running?"Thinking…":"Ready");resolve();};
+    u.onstart=()=>{speaking=true;setState("speaking","Speaking");
+      fallbackTimer=setTimeout(()=>{if(!gotBoundary)timeline=schedule(text,performance.now(),msPerChar);},300);};
+    u.onboundary=e=>{
+      if(e.name&&e.name!=="word")return;
+      gotBoundary=true;
+      const len=e.charLength||((text.slice(e.charIndex).match(/^\S+/)||[""])[0].length);
+      const word=text.substr(e.charIndex,len)+" ";
+      timeline=schedule(word,performance.now(),msPerChar);
+    };
+    u.onend=done; u.onerror=done;
+    const safety=setTimeout(done,text.length*110+4000);
+    synth.speak(u);
+  });
+}
+
+/* ---------- listening ---------- */
+function showHeard(t,interim){heard.textContent=t?("Heard: “"+t.trim()+"”"):"";heard.classList.toggle("interim",!!interim);}
+function micUnavailable(reason){
+  micBlocked=true;
+  micNotice.hidden=false;
+  micNotice.textContent= reason==="unsupported"
+    ? "This browser can't do speech recognition. Open the file in Chrome on your Mac to talk to Alfred. Tapping and typing work here."
+    : "The microphone isn't available in this view, so Alfred can speak but not listen. Open the downloaded file in Chrome on your Mac and allow the microphone to answer by voice. Tapping and typing work here.";
+  wakeChk.checked=false;
+}
+function listenOnce(ms){
+  return new Promise(res=>{
+    if(micBlocked){res({err:"blocked"});return;}
+    const r=new SR(); currentRec=r; r.lang="en-GB"; r.interimResults=true; r.maxAlternatives=1;
+    let fin="",inter="",over=false;
+    const finish=v=>{if(over)return;over=true;clearTimeout(t);try{r.abort()}catch(e){}if(currentRec===r)currentRec=null;res(v);};
+    const t=setTimeout(()=>finish({text:fin||inter}),ms);
+    r.onresult=e=>{inter="";for(let i=e.resultIndex;i<e.results.length;i++){const x=e.results[i][0].transcript;if(e.results[i].isFinal)fin+=x;else inter+=x;}
+      showHeard(fin+inter,!fin); if(fin)finish({text:fin});};
+    r.onerror=e=>finish({err:e.error});
+    r.onend=()=>finish({text:fin||inter});
+    try{r.start();setState("listening","Listening");}catch(e){finish({err:"start-failed"});}
+  });
+}
+function stopListening(){if(currentRec){try{currentRec.abort()}catch(e){}currentRec=null;}}
+
+function matchAnswer(text,q){
+  const t=" "+text.toLowerCase().replace(/[^a-z0-9' ]/g," ")+" ";
+  if(/\b(repeat|say that again|again|pardon)\b/.test(t))return{cmd:"repeat"};
+  if(/\b(skip|next one|pass on that)\b/.test(t))return{cmd:"skip"};
+  if(/\b(stop|cancel|that's all)\b/.test(t))return{cmd:"stop"};
+  for(const [w,i] of Object.entries(NUMS)){ if(i<q.opts.length && new RegExp("\\b(option |number )?"+w+"\\b").test(t) && (w.length>1||/option|number/.test(t))) {if(w==="to"||w==="too"){if(!/option|number/.test(t))continue;} return{opt:i};} }
+  let best=-1,bestLen=0;
+  q.opts.forEach((o,i)=>o[1].forEach(k=>{if(t.includes(" "+k+" ")||t.includes(" "+k)){if(k.length>bestLen){best=i;bestLen=k.length;}}}));
+  if(best>=0)return{opt:best};
+  return{other:text.trim()};
+}
+
+/* ---------- session ---------- */
+function renderQuestion(q){
+  currentQ=q;
+  qmeta.textContent=REMOTE?(q.meta||"Morning brief"):("Question "+(idx+1)+" of "+QUESTIONS.length);
+  qEl.textContent=q.text; optsEl.innerHTML="";
+  q.opts.forEach((o,i)=>{const b=document.createElement("button");b.className="opt";b.type="button";
+    b.innerHTML='<span class="n">'+(i+1)+'</span><span></span><span class="say">say “'+o[1][0]+'”</span>';
+    b.children[1].textContent=o[0];
+    b.addEventListener("click",()=>answer({opt:i}));optsEl.appendChild(b);});
+  typed.hidden=false; typedInput.value="";
+}
+function answer(a){if(pending){const p=pending;pending=null;stopListening();p(a);}}
+function addLog(html){if(!logStarted){logEl.innerHTML="";logStarted=true;}const li=document.createElement("li");li.innerHTML=html;logEl.appendChild(li);}
+function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+async function ask(q){
+  renderQuestion(q);
+  const got=new Promise(r=>pending=r);
+  (async()=>{
+    await speak(q.text);
+    let tries=0;
+    while(pending&&running&&!micBlocked&&tries<2){
+      const r=await listenOnce(9000);
+      if(!pending)return;
+      if(r.err){ if(r.err==="not-allowed"||r.err==="service-not-allowed"||r.err==="start-failed"||r.err==="audio-capture"){micUnavailable("blocked");break;} tries++; continue;}
+      if(!r.text||!r.text.trim()){tries++;continue;}
+      const m=matchAnswer(r.text,q);
+      if(m.cmd==="repeat"){await speak(q.text);continue;}
+      answer(m);return;
+    }
+    if(pending&&running){setState("idle","Waiting for your answer"); if(!micBlocked)await speak("I'll wait for you to tap or type an answer.");}
+  })();
+  return got;
+}
+
+async function run(){
+  if(running)return; running=true; idx=0; stopWake();
+  ["repeatBtn","skipBtn","stopBtn"].forEach(id=>$(id).disabled=false); $("startBtn").disabled=true;
+  if(!SR)micUnavailable("unsupported");
+  while(running&&idx<QUESTIONS.length){
+    const q=QUESTIONS[idx]; const a=await ask(q);
+    if(!running)break;
+    if(a.cmd==="stop"){stop();break;}
+    if(a.cmd==="repeat"){continue;}
+    if(a.cmd==="skip"){addLog("<span>Skipped question "+(idx+1)+"</span>");idx++;await speak("Skipping that one.");continue;}
+    if(a.opt!=null){
+      [...optsEl.children].forEach((b,i)=>b.classList.toggle("chosen",i===a.opt));
+      addLog(esc(q.opts[a.opt][2]));
+      idx++; await speak(ACKS[idx%ACKS.length]+(idx<QUESTIONS.length?" Next.":""));
+    } else if(a.other){
+      addLog("<span>Your own answer:</span> “"+esc(a.other)+"”");
+      idx++; await speak("Okay, I've noted that."+(idx<QUESTIONS.length?" Next.":""));
+    }
+  }
+  if(running){
+    qmeta.textContent="Finished"; qEl.textContent="That's the lot. In the real version, the list on the right would now be applied to your To Do."; optsEl.innerHTML=""; typed.hidden=true;
+    await speak("That's everything. Have a good day.");
+  }
+  stop(true);
+}
+function stop(quiet){
+  running=false; if(pending){const p=pending;pending=null;p({cmd:"stop"});}
+  stopListening(); if(synth)synth.cancel(); speaking=false; timeline=[];
+  ["repeatBtn","skipBtn","stopBtn"].forEach(id=>$(id).disabled=true); $("startBtn").disabled=false; $("startBtn").textContent="Start again";
+  setState("idle","Ready"); if(!quiet)heard.textContent="Stopped.";
+  if(wakeChk.checked)startWake();
+}
+
+$("startBtn").addEventListener("click",()=>{if(REMOTE){wakeRemote();return;}logStarted=false;logEl.innerHTML='<li><span>Answers appear here. In the real version these become To Do changes.</span></li>';run();});
+$("stopBtn").addEventListener("click",()=>stop());
+$("skipBtn").addEventListener("click",()=>answer({cmd:"skip"}));
+$("repeatBtn").addEventListener("click",()=>answer({cmd:"repeat"}));
+typed.addEventListener("submit",e=>{e.preventDefault();const v=typedInput.value.trim();if(!v)return;if(currentQ)answer(matchAnswer(v,currentQ));});
+
+/* ---------- wake word ---------- */
+let wakeRec=null;
+function startWake(){
+  if(!SR){micUnavailable("unsupported");return;}
+  if(micBlocked||running||wakeRec)return;
+  const r=new SR(); wakeRec=r; r.lang="en-GB"; r.continuous=true; r.interimResults=true;
+  setState("idle","Waiting for “Hey Alfred”");
+  r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript.toLowerCase();
+    if(/\b(hey|hi|okay|ok|morning)\s*(alfred|alfie|alford|elfred)\b/.test(t)){stopWake();$("startBtn").click();return;}}};
+  r.onerror=e=>{if(e.error==="not-allowed"||e.error==="service-not-allowed"||e.error==="audio-capture"){wakeRec=null;micUnavailable("blocked");setState("idle","Ready");}};
+  r.onend=()=>{if(wakeRec===r){wakeRec=null;if(wakeChk.checked&&!running&&!micBlocked)setTimeout(startWake,400);}};
+  try{r.start();}catch(e){wakeRec=null;}
+}
+function stopWake(){if(wakeRec){const r=wakeRec;wakeRec=null;try{r.abort()}catch(e){}}}
+wakeChk.addEventListener("change",()=>{if(wakeChk.checked)startWake();else{stopWake();if(!running)setState("idle","Ready");}});
+
+/* ---------- remote control: lets the morning brief drive Alfred ---------- */
+const answers={}; let remoteReady=false, remoteBusy=false;
+const STOPW=new Set(["the","and","for","with","from","it's","its","this","that","your","you","my","in","of","to","a","an"]);
+const bridge=document.createElement("pre"); bridge.id="alfredBridge"; bridge.hidden=true; document.body.appendChild(bridge);
+function publishBridge(){bridge.textContent=JSON.stringify({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok",answers});}
+function toQ(r){return{meta:r.meta,text:String(r.text||""),opts:(r.options||[]).map(l=>{l=String(l);const low=l.toLowerCase();
+  const words=low.replace(/[^a-z0-9' ]/g," ").split(/\s+/).filter(w=>w&&(w.length>2||w==="no")&&!STOPW.has(w));return[l,[low,...words],l];})};}
+async function remoteAsk(r){
+  remoteBusy=true; publishBridge(); const q=toQ(r); let a;
+  do{ a=await ask(q); }while(a&&a.cmd==="repeat"&&running);
+  let out;
+  if(!a||a.cmd==="stop")out={kind:"stopped"};
+  else if(a.cmd==="skip")out={kind:"skip"};
+  else if(a.opt!=null){out={kind:"option",index:a.opt,label:q.opts[a.opt][0]};[...optsEl.children].forEach((b,i)=>b.classList.toggle("chosen",i===a.opt));}
+  else out={kind:"other",text:a.other};
+  answers[r.id]=out;
+  addLog(out.kind==="option"?esc(out.label)+" <span>— "+esc(q.text.slice(0,70))+(q.text.length>70?"…":"")+"</span>":out.kind==="other"?"<span>Your own answer:</span> “"+esc(out.text)+"”":"<span>"+out.kind+"</span>");
+  remoteBusy=false; publishBridge();
+  if(out.kind!=="stopped")await speak(ACKS[Math.floor(Math.random()*ACKS.length)]);
+  if(running)setState("idle","Waiting for the brief");
+}
+function wakeRemote(){
+  remoteReady=true; running=true; logStarted=false; stopWake();
+  $("startBtn").disabled=true; $("stopBtn").disabled=false; $("skipBtn").disabled=false; $("repeatBtn").disabled=false;
+  if(!SR)micUnavailable("unsupported");
+  publishBridge();
+  speak("Morning. I'm ready when the brief is.").then(()=>{ if(!micBlocked&&!remoteBusy) listenOnce(1200).then(r=>{ if(r&&r.err&&/not-allowed|service-not-allowed|audio-capture/.test(r.err))micUnavailable("blocked"); publishBridge(); if(!remoteBusy)setState("idle","Waiting for the brief"); }); });
+}
+const api={
+  state:()=>({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok"}),
+  ask:(r)=>{ if(!remoteReady)return"not-ready"; if(remoteBusy)return"busy"; remoteAsk(r); return"asking"; },
+  answer:(id)=>answers[id]||null,
+  say:(text)=>{ if(!remoteReady)return"not-ready"; speak(String(text)); return"speaking"; },
+  finish:(text)=>{ text=String(text||"That's the brief done."); qmeta.textContent="Finished"; qEl.textContent=text; optsEl.innerHTML=""; typed.hidden=true; speak(text); return"ok"; }
+};
+window.alfredRemote=api;
+document.addEventListener("alfred-command",e=>{try{const c=JSON.parse(e.detail);const res=api[c.cmd]?api[c.cmd](c.arg):"unknown";bridge.dataset.last=JSON.stringify(res);}catch(err){bridge.dataset.last=JSON.stringify("error");}publishBridge();});
+if(REMOTE){
+  document.title="Alfred Morning Brief";
+  $("startBtn").textContent="Wake Alfred";
+  heard.textContent="Click Wake Alfred, then allow the microphone. The morning brief will send its questions here.";
+  qmeta.textContent="Morning brief";
+  qEl.textContent="Waiting for the brief to start. Keep this tab open.";
+  $("hint").textContent="Say the answer or its number. Say “repeat” to hear it again, or “skip”. Tapping and typing also work.";
+  logEl.innerHTML='<li><span>Your answers go back to the brief, which updates To Do.</span></li>';
+  publishBridge();
+}
+
+if(!synth){heard.textContent="This browser can't speak. Open the file in Chrome on your Mac.";}
+})();
+</script>
+
+</body>
+</html>
