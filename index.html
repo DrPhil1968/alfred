@@ -529,6 +529,7 @@ async function run(){
   stop(true);
 }
 function stop(quiet){
+  if(gate){const g=gate;running=false;g.release();}
   running=false; if(longCtl){longCtl.kill();longCtl=null;} if(pending){const p=pending;pending=null;p({cmd:"stop"});}
   $("backBtn").disabled=true; if(typeof recBox!=="undefined")recBox.hidden=true;
   stopListening(); if(synth)synth.cancel(); speaking=false; timeline=[];
@@ -552,6 +553,7 @@ function startWake(){
   if(micBlocked||wakeRec)return;
   const r=new SR(); wakeRec=r; r.lang="en-GB"; r.continuous=true; r.interimResults=true;
   r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript.toLowerCase();
+    if(gate&&(WAKE_RE.test(t)||GO_RE.test(t))){stopWake();gate.release();return;}
     if(asleep&&WAKE_RE.test(t)){stopWake();wakeUp("voice");return;}
     if(!asleep&&SLEEP_RE.test(t)){stopWake();goToSleep(true);return;}}};
   r.onerror=e=>{if(e.error==="not-allowed"||e.error==="service-not-allowed"||e.error==="audio-capture"){wakeRec=null;micUnavailable("blocked");setState("idle","Ready");}};
@@ -656,8 +658,41 @@ async function review(list){
   if(a.opt!=null)return a.opt;
   return -1;
 }
+/* ---------- gate: a routine's questions wait until Phil comes to the tab ---------- */
+let gate=null;
+const GO_RE=/\b(go ahead|go on|i'm here|im here|i am here|ready|start|let's go|lets go|carry on)\b/;
+function routineName(list){const m=String(list.routine||(list[0]&&list[0].meta)||"Your routine").split("·")[0].trim();return m||"Your routine";}
+function waitForPhil(name){
+  return new Promise(res=>{
+    const startFocus=document.visibilityState==="visible"&&document.hasFocus();
+    let reminders=0, done=false;
+    const release=()=>{if(done)return;done=true;clearInterval(remind);
+      ["visibilitychange","focus"].forEach(ev=>(ev==="focus"?window:document).removeEventListener(ev,onShow));
+      document.removeEventListener("pointerdown",onTouch,true);document.removeEventListener("keydown",onTouch,true);
+      gate=null;batch.waiting=false;publishBridge();res();};
+    const onShow=()=>{if(document.visibilityState==="visible"&&document.hasFocus()&&(!startFocus||seenAway))release();};
+    let seenAway=!startFocus;
+    const onAway=()=>{if(document.visibilityState!=="visible"||!document.hasFocus())seenAway=true;};
+    const onTouch=()=>release();
+    document.addEventListener("visibilitychange",()=>{onAway();onShow();});
+    window.addEventListener("blur",onAway); window.addEventListener("focus",onShow);
+    document.addEventListener("pointerdown",onTouch,true); document.addEventListener("keydown",onTouch,true);
+    gate={release,name};
+    batch.waiting=true; batch.waitingSince=Date.now(); publishBridge();
+    qmeta.textContent=name; qEl.textContent=name+" is ready. Alfred will start when you come to this tab, click anywhere on it, or say “go ahead”.";
+    optsEl.innerHTML=""; typed.hidden=true;
+    const b=document.createElement("button");b.type="button";b.className="primary";b.textContent="I'm here – start";b.addEventListener("click",release);optsEl.appendChild(b);
+    setState("idle","Waiting for you");
+    const line=name+" results are ready, Phil. I'll wait until you're at the Alfred tab.";
+    speak(line);
+    const remind=setInterval(()=>{if(done)return;reminders++;if(reminders>3){clearInterval(remind);return;}speak("Still waiting, Phil. "+name+" is ready when you are.");},300000);
+  });
+}
 async function remoteRunAll(list){
-  remoteBusy=true; batch={total:list.length,asked:0,done:false,reviewing:false}; publishBridge();
+  remoteBusy=true; batch={total:list.length,asked:0,done:false,reviewing:false,waiting:true,waitingSince:Date.now()}; publishBridge();
+  await waitForPhil(routineName(list));
+  if(!running){batch.done=true;remoteBusy=false;publishBridge();return;}
+  await speak("Right, Phil. Here we go.");
   let i=0, stopped=false;
   while(i<list.length&&running){
     const res=await runItem(list[i],i,list,false);
@@ -678,11 +713,12 @@ async function remoteRunAll(list){
   batch.done=true; remoteBusy=false; publishBridge();
   if(running&&!stopped){qmeta.textContent="Finished";qEl.textContent=list.closing||"That's everything. Updating To Do now.";optsEl.innerHTML="";typed.hidden=true;setState("idle","Updating To Do");await speak("Thank you. I'll update To Do now.");}
 }
-function wakeRemote(){
+function wakeRemote(silent){
   remoteReady=true; running=true; logStarted=false; stopWake();
   $("startBtn").disabled=true; $("stopBtn").disabled=false; $("skipBtn").disabled=false; $("repeatBtn").disabled=false; $("laterBtn").disabled=false; setBack(false);
   if(!SR)micUnavailable("unsupported");
   publishBridge();
+  if(silent){ setState("idle","Waiting for a routine"); return; }
   speak("Ready when you are, Phil.").then(()=>{ if(!micBlocked&&!remoteBusy) listenOnce(1200).then(r=>{ if(r&&r.err&&/not-allowed|service-not-allowed|audio-capture/.test(r.err))micUnavailable("blocked"); publishBridge(); if(!remoteBusy)setState("idle","Waiting for your instruction"); }); });
 }
 
@@ -920,7 +956,7 @@ function wakeUp(source){
   if(source!=="remote")setDnd(false);
   asleep=false; everWoken=true; lastActive=Date.now(); stopWake(); renderSleep();
   heard.classList.remove("interim"); heard.textContent="Awake. Say “Snooze Alfred” when you're done.";
-  if(REMOTE){lsSet(LIVE_KEY,{tab:TAB_ID,at:Date.now()});wakeRemote();} else {speak("Yes, Phil?");}
+  if(REMOTE){lsSet(LIVE_KEY,{tab:TAB_ID,at:Date.now()});wakeRemote(source==="remote");} else {speak("Yes, Phil?");}
   return true;
 }
 function goToSleep(byPhil){
@@ -935,7 +971,7 @@ function ambientWanted(){
   if(!SR||micBlocked||document.visibilityState!=="visible")return false;
   if(currentRec||pending||speaking)return false;
   if(asleep&&otherLive())return false;
-  if(!asleep&&REMOTE&&remoteBusy)return false;
+  if(!asleep&&REMOTE&&remoteBusy&&!gate)return false;
   return true;
 }
 $("sleepBtn").addEventListener("click",()=>goToSleep(true));
