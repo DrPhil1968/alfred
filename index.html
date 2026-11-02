@@ -310,10 +310,14 @@ if(synth){loadVoices(); synth.onvoiceschanged=loadVoices;}
 
 function setState(s,label){stage.classList.toggle("speaking",s==="speaking");stage.classList.toggle("listening",s==="listening");statusText.textContent=label;}
 
+/* How Alfred should say words the voice gets wrong. Display text is unchanged. */
+const PRONOUNCE=[[/\bDebach\b/gi,"Debbidge"]];
+function sayLike(t){return PRONOUNCE.reduce((x,[re,say])=>x.replace(re,say),t);}
 function speak(text){
   return new Promise(resolve=>{
     if(!synth){resolve();return;}
     synth.cancel();
+    text=sayLike(text);
     const u=new SpeechSynthesisUtterance(text);
     const v=voices.find(v=>v.name===voiceSel.value); if(v){u.voice=v;u.lang=v.lang;} else u.lang="en-GB";
     u.rate=1; let gotBoundary=false, fallbackTimer=null, finished=false;
@@ -466,11 +470,11 @@ wakeChk.addEventListener("change",()=>{if(wakeChk.checked)startWake();else{stopW
 const answers={}; let remoteReady=false, remoteBusy=false;
 const STOPW=new Set(["the","and","for","with","from","it's","its","this","that","your","you","my","in","of","to","a","an"]);
 const bridge=document.createElement("pre"); bridge.id="alfredBridge"; bridge.hidden=true; document.body.appendChild(bridge);
-function publishBridge(){bridge.textContent=JSON.stringify({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok",answers});}
+function publishBridge(){bridge.textContent=JSON.stringify({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok",batch:(typeof batch!=="undefined"?batch:null),answers});}
 function toQ(r){return{meta:r.meta,text:String(r.text||""),opts:(r.options||[]).map(l=>{l=String(l);const low=l.toLowerCase();
   const words=low.replace(/[^a-z0-9' ]/g," ").split(/\s+/).filter(w=>w&&(w.length>2||w==="no")&&!STOPW.has(w));return[l,[low,...words],l];})};}
-async function remoteAsk(r){
-  remoteBusy=true; publishBridge(); const q=toQ(r); let a;
+async function remoteAsk(r,inBatch){
+  if(!inBatch){remoteBusy=true; publishBridge();} const q=toQ(r); let a;
   do{ a=await ask(q); }while(a&&a.cmd==="repeat"&&running);
   let out;
   if(!a||a.cmd==="stop")out={kind:"stopped"};
@@ -479,9 +483,24 @@ async function remoteAsk(r){
   else out={kind:"other",text:a.other};
   answers[r.id]=out;
   addLog(out.kind==="option"?esc(out.label)+" <span>— "+esc(q.text.slice(0,70))+(q.text.length>70?"…":"")+"</span>":out.kind==="other"?"<span>Your own answer:</span> “"+esc(out.text)+"”":"<span>"+out.kind+"</span>");
-  remoteBusy=false; publishBridge();
+  if(!inBatch)remoteBusy=false; publishBridge();
   if(out.kind!=="stopped")await speak(ACKS[Math.floor(Math.random()*ACKS.length)]);
-  if(running)setState("idle","Waiting for the brief");
+  if(running&&!inBatch)setState("idle","Waiting for the brief");
+  return out;
+}
+let batch={total:0,asked:0,done:false};
+async function remoteRunAll(list){
+  remoteBusy=true; batch={total:list.length,asked:0,done:false}; publishBridge();
+  for(let i=0;i<list.length&&running;i++){
+    const r=list[i]; r.meta=r.meta||("Morning brief · "+(i+1)+" of "+list.length);
+    const out=await remoteAsk(r,true); batch.asked=i+1;
+    if(!out||out.kind==="stopped")break;
+    const fu=r.followUps&&out.kind==="option"&&r.followUps[out.index];
+    if(fu&&running){fu.meta=r.meta+" · follow-up"; const o2=await remoteAsk(fu,true); if(!o2||o2.kind==="stopped")break;}
+    publishBridge();
+  }
+  batch.done=true; remoteBusy=false; publishBridge();
+  if(running){qmeta.textContent="Finished";qEl.textContent=list.closing||"That's everything. Updating To Do now.";optsEl.innerHTML="";typed.hidden=true;setState("idle","Updating To Do");await speak("That's everything. I'll update To Do now.");}
 }
 function wakeRemote(){
   remoteReady=true; running=true; logStarted=false; stopWake();
@@ -491,9 +510,11 @@ function wakeRemote(){
   speak("Morning. I'm ready when the brief is.").then(()=>{ if(!micBlocked&&!remoteBusy) listenOnce(1200).then(r=>{ if(r&&r.err&&/not-allowed|service-not-allowed|audio-capture/.test(r.err))micUnavailable("blocked"); publishBridge(); if(!remoteBusy)setState("idle","Waiting for the brief"); }); });
 }
 const api={
-  state:()=>({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok"}),
+  state:()=>({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok",batch}),
   ask:(r)=>{ if(!remoteReady)return"not-ready"; if(remoteBusy)return"busy"; remoteAsk(r); return"asking"; },
   answer:(id)=>answers[id]||null,
+  askAll:(list)=>{ if(!remoteReady)return"not-ready"; if(remoteBusy)return"busy"; remoteRunAll(list); return"asking"; },
+  results:()=>({batch,answers}),
   say:(text)=>{ if(!remoteReady)return"not-ready"; speak(String(text)); return"speaking"; },
   finish:(text)=>{ text=String(text||"That's the brief done."); qmeta.textContent="Finished"; qEl.textContent=text; optsEl.innerHTML=""; typed.hidden=true; speak(text); return"ok"; }
 };
