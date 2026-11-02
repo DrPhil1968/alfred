@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alfred 3D test</title>
+<style>
+:root{--bg:#f4efe4;--ink:#2b2a27;--muted:#6f6a60;--accent:#2f5d50;--card:#fffdf8;--line:#ddd5c4}
+@media (prefers-color-scheme:dark){:root{--bg:#1d1c1a;--ink:#ece6d9;--muted:#a59f92;--accent:#7fb8a6;--card:#262522;--line:#3a3833}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 Georgia,"Times New Roman",serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:1.3rem;margin:4px 0 2px}
+.sub{color:var(--muted);font-size:.9rem;margin:0 0 12px}
+#avatar{width:100%;height:min(62vh,520px);border-radius:14px;background:radial-gradient(circle at 50% 35%,#fffaf0,#e9e0cc);border:1px solid var(--line);position:relative;overflow:hidden}
+@media (prefers-color-scheme:dark){#avatar{background:radial-gradient(circle at 50% 35%,#3a3833,#22211f)}}
+#loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.95rem;text-align:center;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px}
+#question{font-size:1.1rem;margin:0}
+#heard{color:var(--muted);font-style:italic;margin-top:6px;min-height:1.3em}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:center}
+button{font:inherit;padding:10px 18px;border-radius:999px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--accent)}
+button:disabled{opacity:.45;cursor:default}
+select{font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);max-width:100%}
+#timing{color:var(--muted);font-size:.85rem;margin-top:8px}
+.note{color:var(--muted);font-size:.8rem;margin-top:16px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Alfred — 3D look test</h1>
+  <p class="sub">Stand-in character only. This page tests the style, the lip-sync and the delay, not the final Alfred.</p>
+
+  <div id="avatar"></div>
+
+  <div class="card">
+    <p id="question">Press Start. Alfred will ask six sample questions and listen for your answer.</p>
+    <div id="heard"></div>
+  </div>
+
+  <div class="row">
+    <button id="start" disabled>Start</button>
+    <button id="stop" class="ghost" disabled>Stop</button>
+    <label>Character <select id="charSel"></select></label>
+    <label>Voice <select id="voiceSel"></select></label>
+  </div>
+  <div id="timing"></div>
+
+  <p class="note">Characters: sample models from the TalkingHead project, for non-commercial testing only — “Man — realistic” made with Avatar SDK, “Woman — realistic” made with Avaturn, “Woman — game style” made with Ready Player Me (CC BY-NC 4.0). 3D engine: TalkingHead by met4citizen (MIT). Voice and listening use your browser’s built-in speech, so nothing is sent to a paid service.</p>
+</main>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js/+esm",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+  "talkinghead": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs"
+} }
+</script>
+<script type="module">
+import { TalkingHead } from "talkinghead";
+
+const $ = id => document.getElementById(id);
+const QUESTIONS = [
+  "Good morning. Shall we start with the production plan for today?",
+  "Is the stock count at Debach finished, or is it still open?",
+  "Do you want me to chase the supplier about the late delivery?",
+  "Is anything blocking the team on the main line this morning?",
+  "Should I add a reminder to review the training videos this week?",
+  "Anything else you'd like on today's list?"
+];
+const PRONOUNCE = [[/\bDebach\b/gi, "Deb-idge"]];
+const sayLike = t => PRONOUNCE.reduce((x,[re,s]) => x.replace(re,s), t);
+
+let head, running = false, voices = [];
+const synth = window.speechSynthesis;
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+/* ---------- avatar ---------- */
+const CHARACTERS = {
+  man: { label: "Man — realistic", url: "./avatars/avatarsdk.glb", body: "M", avatarMood: "neutral",
+    retarget: { Neck:{z:-0.01,rx:-0.15}, Neck1:{z:-0.01,rx:-0.15}, Neck2:{z:-0.01,rx:-0.15},
+      LeftShoulder:{rz:-0.3}, RightShoulder:{rz:0.3}, scaleToEyesLevel:1.0, origin:{y:-0.1} },
+    baseline: { headRotateX:-0.04, eyeBlinkLeft:0.05, eyeBlinkRight:0.05 } },
+  woman: { label: "Woman — realistic", url: "./avatars/avaturn.glb", body: "F", avatarMood: "neutral",
+    retarget: { Hips:{y:0.03}, Spine:{y:0.02}, Spine1:{y:0.02,z:0.01}, Spine2:{y:0.02,z:0.01},
+      Neck:{z:0.02,y:0.01}, Head:{z:0.02}, LeftShoulder:{rx:-0.5}, RightShoulder:{rx:-0.5}, scaleToHipsLevel:1.0 },
+    baseline: { headRotateX:-0.05, eyeBlinkLeft:0.15, eyeBlinkRight:0.15 } },
+  game: { label: "Woman — game style", url: "./avatars/brunette.glb", body: "F", avatarMood: "neutral" }
+};
+$("charSel").innerHTML = Object.entries(CHARACTERS).map(([k,c]) => `<option value="${k}">${c.label}</option>`).join("");
+
+head = new TalkingHead($("avatar"), {
+  lipsyncModules: ["en"], lipsyncLang: "en",
+  cameraView: "head", cameraRotateEnable: false,
+  avatarIdleEyeContact: 0.4, avatarSpeakingEyeContact: 0.7, modelFPS: 30
+});
+window.alfredHead = head;
+
+async function loadCharacter(key) {
+  const c = CHARACTERS[key], t0 = performance.now();
+  stop(); $("start").disabled = true; $("charSel").disabled = true;
+  const box = document.createElement("div"); box.id = "loading"; box.textContent = "Loading the 3D character…";
+  $("avatar").appendChild(box);
+  try {
+    await head.showAvatar({ ...c, lipsyncLang: "en" }, ev => {
+      if (ev.lengthComputable) box.textContent = "Loading the 3D character… " + Math.round(ev.loaded/ev.total*100) + "%";
+    });
+    head.setView("head");
+    $("timing").textContent = "Character loaded in " + ((performance.now()-t0)/1000).toFixed(1) + " s (faster next time — your browser keeps a copy).";
+    $("start").disabled = false;
+  } catch (e) {
+    $("timing").textContent = "Couldn't load that character: " + e.message;
+  }
+  box.remove(); $("charSel").disabled = false;
+}
+$("charSel").onchange = e => loadCharacter(e.target.value);
+
+/* ---------- voice ---------- */
+function loadVoices() {
+  voices = synth.getVoices().filter(v => /^en/i.test(v.lang));
+  const score = v => (v.lang === "en-GB" ? 10 : 0) + (/daniel|arthur|oliver|george|male/i.test(v.name) ? 5 : 0) - (/female|serena|kate|martha|stephanie/i.test(v.name) ? 5 : 0);
+  voices.sort((a,b) => score(b) - score(a));
+  $("voiceSel").innerHTML = voices.map(v => `<option>${v.name} (${v.lang})</option>`).join("");
+}
+if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
+
+/* TalkingHead only animates lips alongside audio, so give it silence of the right length
+   while the browser voice does the real talking. */
+function lips(words, wtimes, wdurations, totalMs) {
+  const ctx = head.audioCtx, len = Math.max(1, Math.round(ctx.sampleRate * totalMs / 1000));
+  const audio = ctx.createBuffer(1, len, ctx.sampleRate);
+  head.speakAudio({ audio, words, wtimes, wdurations }, { isRaw:true });
+}
+window.alfredLips = lips;
+
+/* Speak with the browser voice and move the lips word by word. */
+function speak(text) {
+  return new Promise(resolve => {
+    const spoken = sayLike(text);
+    const u = new SpeechSynthesisUtterance(spoken);
+    const v = voices[$("voiceSel").selectedIndex];
+    if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-GB";
+    u.rate = 0.98;
+    let gotBoundary = false, fallback;
+    const mouth = (word, ms) => lips([word], [0], [ms], ms);
+    u.onstart = () => {
+      // Some voices never report word timings; then estimate the whole sentence.
+      fallback = setTimeout(() => {
+        if (gotBoundary) return;
+        const words = spoken.split(/\s+/); let t = 0;
+        const wtimes = [], wdur = [];
+        words.forEach(w => { const d = Math.max(180, w.length * 70); wtimes.push(t); wdur.push(d); t += d + 40; });
+        lips(words, wtimes, wdur, t);
+      }, 350);
+    };
+    u.onboundary = e => {
+      if (e.name && e.name !== "word") return;
+      gotBoundary = true;
+      const len = e.charLength || (spoken.slice(e.charIndex).match(/^\S+/) || [""])[0].length;
+      const word = spoken.substr(e.charIndex, len);
+      if (word.trim()) mouth(word, Math.max(160, word.length * 70));
+    };
+    u.onend = u.onerror = () => { clearTimeout(fallback); resolve(); };
+    synth.cancel(); synth.speak(u);
+  });
+}
+
+/* ---------- listening ---------- */
+function listenOnce(ms = 7000) {
+  return new Promise(resolve => {
+    if (!SR) { resolve(null); return; }
+    const r = new SR(); r.lang = "en-GB"; r.interimResults = true;
+    let text = "", done = false;
+    const finish = () => { if (done) return; done = true; try { r.abort(); } catch(e){} resolve(text.trim() || null); };
+    r.onresult = e => { text = [...e.results].map(x => x[0].transcript).join(" "); $("heard").textContent = "Heard: “" + text + "”"; };
+    r.onend = finish; r.onerror = finish;
+    setTimeout(finish, ms);
+    try { r.start(); } catch(e) { finish(); }
+  });
+}
+
+/* ---------- run ---------- */
+async function run() {
+  running = true; $("start").disabled = true; $("stop").disabled = false;
+  for (const q of QUESTIONS) {
+    if (!running) break;
+    $("question").textContent = q; $("heard").textContent = "";
+    const ts = performance.now();
+    await speak(q);
+    if (!running) break;
+    $("timing").textContent = "Spoke that line in " + ((performance.now()-ts)/1000).toFixed(1) + " s.";
+    head.setMood("happy");
+    const ans = await listenOnce();
+    head.setMood("neutral");
+    if (!running) break;
+    $("heard").textContent = ans ? "Heard: “" + ans + "”" : (SR ? "Didn't catch an answer — moving on." : "Listening isn't available in this browser.");
+    await speak(ans ? "Thank you, noted." : "Never mind, we'll come back to it.");
+  }
+  if (running) { $("question").textContent = "That's the end of the test."; await speak("That's everything for now."); }
+  stop();
+}
+function stop() { running = false; synth?.cancel(); try { head.stopSpeaking(); } catch(e){} $("start").disabled = false; $("stop").disabled = true; }
+$("start").onclick = run;
+$("stop").onclick = stop;
+loadCharacter("man");
+document.addEventListener("visibilitychange", () => document.hidden ? head?.stop() : head?.start());
+</script>
+</body>
+</html>
