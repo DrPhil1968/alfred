@@ -128,6 +128,21 @@ details.em summary{cursor:pointer;color:var(--muted);font-size:.88rem}
 details.em ol{margin:6px 0 0;padding-left:1.2em;display:grid;gap:4px;font-size:.88rem}
 details.em li span{color:var(--muted)}
 .empty{color:var(--muted);font-size:.9rem;margin:0}
+
+/* Sleep: eyes shut, antenna dimmed, slow breathing, floating z's. */
+.stage.asleep #head{animation:breathe 4.5s ease-in-out infinite}
+@keyframes breathe{0%,100%{transform:rotate(-2.5deg) translateY(1px)}50%{transform:rotate(-2.5deg) translateY(3.5px)}}
+.stage.asleep #eyeL,.stage.asleep #eyeR{opacity:.45}
+.stage.asleep #smile{opacity:.4}
+.stage.asleep #antennaLight{fill:#5E6B76}
+.stage.asleep #browL,.stage.asleep #browR{transform:translateY(3px);transform-box:fill-box}
+#zzz{opacity:0;transition:opacity .4s}
+.stage.asleep #zzz{opacity:1}
+#zzz text{font-family:var(--display);font-weight:800;fill:var(--stage-ink);animation:zfloat 3s ease-in-out infinite;opacity:0}
+.stage.asleep .controls button:not(#startBtn){display:none}
+#zzz text:nth-child(2){animation-delay:1s} #zzz text:nth-child(3){animation-delay:2s}
+@keyframes zfloat{0%{opacity:0;transform:translate(0,6px)}20%{opacity:1}75%{opacity:.85}100%{opacity:0;transform:translate(10px,-14px)}}
+@media (prefers-reduced-motion:reduce){.stage.asleep #head,#zzz text{animation:none}#zzz text{opacity:.8}}
 </style>
 
 <div class="app">
@@ -196,6 +211,7 @@ details.em li span{color:var(--muted)}
         <path d="M120 46V22" stroke="var(--alf-metal)" stroke-width="2.4" stroke-linecap="round"/>
         <circle cx="120" cy="16" r="9" fill="var(--alf-brass)" stroke="var(--alf-brass-dark)" stroke-width="1.6"/>
         <circle id="antennaLight" cx="120" cy="16" r="5" filter="url(#glow)"/>
+        <g id="zzz" aria-hidden="true"><text x="166" y="42" font-size="17">z</text><text x="180" y="28" font-size="22">z</text><text x="196" y="13" font-size="28">Z</text></g>
         <!-- ear bolts -->
         <rect x="34" y="96" width="20" height="44" rx="8" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="2"/>
         <rect x="186" y="96" width="20" height="44" rx="8" fill="url(#steel)" stroke="var(--alf-line)" stroke-width="2"/>
@@ -229,10 +245,11 @@ details.em li span{color:var(--muted)}
       </g>
     </svg>
     <div class="status"><span class="dot"></span><span id="statusText">Ready</span></div>
-    <div class="heard" id="heard" aria-live="polite">Press Start, or turn on the wake word and say “Hey Alfred”.</div>
+    <div class="heard" id="heard" aria-live="polite">Asleep. Say “Hey Alfred” to wake him.</div>
     <div class="controls">
       <button id="backBtn" disabled>◀ Back</button>
-      <button class="primary" id="startBtn">Start</button>
+      <button class="primary" id="startBtn">Wake Alfred</button>
+      <button id="sleepBtn" hidden>Sleep</button>
       <button id="repeatBtn" disabled>Repeat</button>
       <button id="skipBtn" disabled>Skip</button>
       <button id="laterBtn" disabled>Later</button>
@@ -272,15 +289,11 @@ details.em li span{color:var(--muted)}
       <input id="typedInput" type="text" placeholder="Or type a different answer" autocomplete="off">
       <button type="submit">Answer</button>
     </form>
-    <p class="hint" id="hint">Voice commands: say the answer, its number (“one”, “two”), “repeat” or “skip”.</p>
+    <p class="hint" id="hint">Say “Hey Alfred” to wake him and “Sleep Alfred” to send him to sleep. Asleep, he listens only for his name, and only while this tab is on screen.</p>
     <div class="notice" id="micNotice" hidden></div>
-    <div class="settings">
-      <label for="voiceSel">Voice <select id="voiceSel"></select></label>
-      <label for="wakeChk"><input type="checkbox" id="wakeChk"> Wake word “Hey Alfred”</label>
-    </div>
     <div class="log">
-      <h2>What Alfred would do</h2>
-      <ol id="log"><li><span>Answers appear here. In the real version these become To Do changes.</span></li></ol>
+      <h2>Answers</h2>
+      <ol id="log"><li><span>Answers appear here during a routine.</span></li></ol>
     </div>
   </section>
 </div>
@@ -317,7 +330,7 @@ const NUMS={one:0,first:0,"1":0,two:1,second:1,"2":1,to:1,too:1,three:2,third:2,
 const $=id=>document.getElementById(id);
 const stage=$("stage"),statusText=$("statusText"),heard=$("heard"),qEl=$("question"),qmeta=$("qmeta"),
       optsEl=$("options"),typed=$("typed"),typedInput=$("typedInput"),logEl=$("log"),micNotice=$("micNotice"),
-      voiceSel=$("voiceSel"),wakeChk=$("wakeChk");
+      wakeChk={checked:false};
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 const synth=window.speechSynthesis;
 
@@ -361,7 +374,7 @@ requestAnimationFrame(frame);
 /* blinking */
 const eyeL=$("eyeL"),eyeR=$("eyeR");
 const EYE_RY=eyeL.getAttribute("ry");
-function blink(){eyeL.setAttribute("ry",0.8);eyeR.setAttribute("ry",0.8);
+function blink(){if(typeof asleep!=="undefined"&&asleep){setTimeout(blink,3000);return;}eyeL.setAttribute("ry",0.8);eyeR.setAttribute("ry",0.8);
   setTimeout(()=>{eyeL.setAttribute("ry",EYE_RY);eyeR.setAttribute("ry",EYE_RY);},120);
   setTimeout(blink,2500+Math.random()*3500);}
 setTimeout(blink,2000);
@@ -370,11 +383,9 @@ setTimeout(blink,2000);
 function loadVoices(){
   if(!synth)return;
   voices=synth.getVoices().filter(v=>/^en/i.test(v.lang));
-  const prev=voiceSel.value; voiceSel.innerHTML="";
-  const ranked=[...voices].sort((a,b)=>score(b)-score(a));
-  ranked.forEach(v=>{const o=document.createElement("option");o.value=v.name;o.textContent=v.name+" ("+v.lang+")";voiceSel.appendChild(o);});
-  if(prev&&ranked.some(v=>v.name===prev))voiceSel.value=prev;
+  chosenVoice=voices.find(v=>/^daniel/i.test(v.name)&&v.lang==="en-GB")||voices.find(v=>/daniel/i.test(v.name))||[...voices].sort((a,b)=>score(b)-score(a))[0]||null;
 }
+let chosenVoice=null;
 const FEMALE=/serena|kate|martha|stephanie|moira|tessa|karen|samantha|fiona|victoria|allison|ava|susan|zoe|libby|sonia|hazel|maisie|female/i;
 const MALE=/daniel|oliver|arthur|alex|fred|tom|aaron|rishi|gordon|ryan|thomas|george|male\b/i;
 function score(v){return (MALE.test(v.name)&&!FEMALE.test(v.name)?10:0)-(FEMALE.test(v.name)?10:0)+(v.lang==="en-GB"?8:0)+(v.localService?3:0)+(/daniel|oliver|arthur/i.test(v.name)?2:0);}
@@ -394,7 +405,7 @@ function speak(text){
     synth.cancel();
     text=sayLike(text);
     const u=new SpeechSynthesisUtterance(text);
-    const v=voices.find(v=>v.name===voiceSel.value); if(v){u.voice=v;u.lang=v.lang;} else u.lang="en-GB";
+    const v=chosenVoice; if(v){u.voice=v;u.lang=v.lang;} else u.lang="en-GB";
     u.rate=1; let gotBoundary=false, fallbackTimer=null, finished=false;
     const msPerChar=62;
     const done=()=>{if(finished)return;finished=true;clearTimeout(fallbackTimer);clearTimeout(safety);speaking=false;timeline=[];setState("idle",running?"Thinking…":"Ready");resolve();};
@@ -426,7 +437,7 @@ function micUnavailable(reason){
 function listenOnce(ms){
   return new Promise(res=>{
     if(micBlocked){res({err:"blocked"});return;}
-    const r=new SR(); currentRec=r; r.lang="en-GB"; r.interimResults=true; r.maxAlternatives=1;
+    stopWake(); const r=new SR(); currentRec=r; r.lang="en-GB"; r.interimResults=true; r.maxAlternatives=1;
     let fin="",inter="",over=false;
     const finish=v=>{if(over)return;over=true;clearTimeout(t);try{r.abort()}catch(e){}if(currentRec===r)currentRec=null;res(v);};
     const t=setTimeout(()=>finish({text:fin||inter}),ms);
@@ -441,6 +452,7 @@ function stopListening(){if(currentRec){try{currentRec.abort()}catch(e){}current
 
 function matchAnswer(text,q){
   const t=" "+text.toLowerCase().replace(/[^a-z0-9' ]/g," ")+" ";
+  if(SLEEP_RE.test(t))return{cmd:"stop",sleep:true};
   if(/\b(go back|previous question|back one)\b/.test(t))return{cmd:"back"};
   if(/^\s*(later|ask me later|come back to (it|that)( later)?|leave it for now)\s*$/.test(t))return{cmd:"later"};
   if(/\b(repeat|say that again|again|pardon)\b/.test(t))return{cmd:"repeat"};
@@ -482,6 +494,7 @@ async function ask(q){
       if(!r.text||!r.text.trim()){tries++;continue;}
       const m=matchAnswer(r.text,q);
       if(m.cmd==="repeat"){await speak(q.text);if(pending!==mine)return;continue;}
+      if(m.sleep){goToSleep(true);return;}
       answer(m);return;
     }
     if(pending===mine&&running){setState("idle","Waiting for your answer");}
@@ -519,34 +532,33 @@ function stop(quiet){
   running=false; if(longCtl){longCtl.kill();longCtl=null;} if(pending){const p=pending;pending=null;p({cmd:"stop"});}
   $("backBtn").disabled=true; if(typeof recBox!=="undefined")recBox.hidden=true;
   stopListening(); if(synth)synth.cancel(); speaking=false; timeline=[];
-  ["repeatBtn","skipBtn","stopBtn","laterBtn"].forEach(id=>$(id).disabled=true); $("startBtn").disabled=false; $("startBtn").textContent="Start again";
+  ["repeatBtn","skipBtn","stopBtn","laterBtn"].forEach(id=>$(id).disabled=true); $("startBtn").disabled=false; 
   setState("idle","Ready"); if(!quiet)heard.textContent="Stopped.";
   if(wakeChk.checked)startWake();
 }
 
-$("startBtn").addEventListener("click",()=>{if(REMOTE){wakeRemote();return;}logStarted=false;logEl.innerHTML='<li><span>Answers appear here. In the real version these become To Do changes.</span></li>';run();});
+$("startBtn").addEventListener("click",()=>{if(asleep){wakeUp(REMOTE?"remote":"button");return;} if(REMOTE)wakeRemote();});
 $("stopBtn").addEventListener("click",()=>stop());
 $("skipBtn").addEventListener("click",()=>answer({cmd:"skip"}));
 $("laterBtn").addEventListener("click",()=>answer({cmd:"later"}));
 $("repeatBtn").addEventListener("click",()=>answer({cmd:"repeat"}));
 $("backBtn").addEventListener("click",()=>answer({cmd:"back"}));
-typed.addEventListener("submit",e=>{e.preventDefault();const v=typedInput.value.trim();if(!v)return;if(!currentQ)return; if(currentQ.mode==="free")answer({free:v}); else if(currentQ.mode==="collect")answer({item:v}); else answer(matchAnswer(v,currentQ));});
+typed.addEventListener("submit",e=>{e.preventDefault();const v=typedInput.value.trim();if(!v)return;if(!currentQ)return; if(currentQ.mode==="free")answer({free:v}); else if(currentQ.mode==="collect")answer({item:v}); else {const m=matchAnswer(v,currentQ); if(m.sleep)goToSleep(true); else answer(m);}});
 
 /* ---------- wake word ---------- */
 let wakeRec=null;
 function startWake(){
   if(!SR){micUnavailable("unsupported");return;}
-  if(micBlocked||running||wakeRec)return;
+  if(micBlocked||wakeRec)return;
   const r=new SR(); wakeRec=r; r.lang="en-GB"; r.continuous=true; r.interimResults=true;
-  setState("idle","Waiting for “Hey Alfred”");
   r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript.toLowerCase();
-    if(/\b(hey|hi|okay|ok|morning)\s*(alfred|alfie|alford|elfred)\b/.test(t)){stopWake();$("startBtn").click();return;}}};
+    if(asleep&&WAKE_RE.test(t)){stopWake();wakeUp("voice");return;}
+    if(!asleep&&SLEEP_RE.test(t)){stopWake();goToSleep(true);return;}}};
   r.onerror=e=>{if(e.error==="not-allowed"||e.error==="service-not-allowed"||e.error==="audio-capture"){wakeRec=null;micUnavailable("blocked");setState("idle","Ready");}};
-  r.onend=()=>{if(wakeRec===r){wakeRec=null;if(wakeChk.checked&&!running&&!micBlocked)setTimeout(startWake,400);}};
+  r.onend=()=>{if(wakeRec===r)wakeRec=null;};
   try{r.start();}catch(e){wakeRec=null;}
 }
 function stopWake(){if(wakeRec){const r=wakeRec;wakeRec=null;try{r.abort()}catch(e){}}}
-wakeChk.addEventListener("change",()=>{if(wakeChk.checked)startWake();else{stopWake();if(!running)setState("idle","Ready");}});
 
 /* ---------- remote control: lets the morning brief drive Alfred ---------- */
 const answers={}, drafts={}; let remoteReady=false, remoteBusy=false, backAllowed=false;
@@ -686,7 +698,7 @@ function makeRecorder(o){
   const upd=()=>{o.onUpdate&&o.onUpdate(all());setRecUI();};
   function startSR(){
     if(st.dead||st.paused||micBlocked||st.r)return;
-    const r=new SR(); st.r=r; currentRec=r; r.lang="en-GB"; r.continuous=true; r.interimResults=true;
+    stopWake(); const r=new SR(); st.r=r; currentRec=r; r.lang="en-GB"; r.continuous=true; r.interimResults=true;
     r.onresult=e=>{ if(st.r!==r)return; st.heard=true; st.last=Date.now(); st.inter="";
       for(let i=e.resultIndex;i<e.results.length;i++){const x=e.results[i][0].transcript; if(e.results[i].isFinal)st.fin=(st.fin+" "+x.trim()).trim(); else st.inter+=x;}
       upd();
@@ -795,11 +807,11 @@ async function remoteCollect(r){
   return out;
 }
 const api={
-  state:()=>({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok",batch}),
+  state:()=>({ready:remoteReady,busy:remoteBusy,mic:micBlocked?"blocked":"ok",batch,asleep,dnd:dndOn()}),
   ask:(r)=>{ if(!remoteReady)return"not-ready"; if(remoteBusy)return"busy"; remoteAsk(r); return"asking"; },
   answer:(id)=>answers[id]||null,
   askAll:(list)=>{ if(!remoteReady)return"not-ready"; if(remoteBusy)return"busy"; remoteRunAll(list); return"asking"; },
-  results:()=>({batch,answers}),
+  results:()=>({batch,answers,asleep}),
   say:(text)=>{ if(!remoteReady)return"not-ready"; speak(String(text)); return"speaking"; },
   finish:(text,receipt)=>{ text=String(text||"All done."); qmeta.textContent="Finished"; qEl.textContent=text; optsEl.innerHTML=""; typed.hidden=true;
     if(Array.isArray(receipt)&&receipt.length){logStarted=true;logEl.innerHTML="";receipt.forEach(x=>{const li=document.createElement("li");const ok=x&&x.ok!==false;li.innerHTML=(ok?"✓ ":"<b>✗ NOT DONE</b> ")+esc(String((x&&x.text)||x||""));logEl.appendChild(li);});}
@@ -874,11 +886,72 @@ api.emails=(e)=>{ if(!e)return"bad-input"; board.emails={at:new Date().toISOStri
   bSave(); return board.emails.items?board.emails.items.length:board.emails.count; };
 api.board=()=>JSON.parse(JSON.stringify(board));
 window.alfredRemote=api;
+/* ---------- sleep and wake ---------- */
+/* Asleep: only listens for "Hey Alfred", and only while this tab is on screen.
+   Awake: listens for "Sleep Alfred" between questions. "Sleep Alfred" from Phil holds until he wakes him or 06:00 next day;
+   routines then can't wake him and fall back to asking in Claude. */
+const WAKE_RE=/\b(hey|hi|okay|ok|morning|wake up)\s*,?\s*(alfred|alfie|alford|elfred)\b/;
+const SLEEP_RE=/(\b(sleep|go to sleep|goodnight|good night|night night)\s*,?\s*(alfred|alfie|alford|elfred)\b)|(\b(alfred|alfie)\s*,?\s*(go to )?sleep\b)/;
+const DND_KEY="alfred.dnd.v1", LIVE_KEY="alfred.live.v1", TAB_ID=Math.random().toString(36).slice(2);
+let asleep=true, lastActive=Date.now();
+function lsGet(k){try{return JSON.parse(localStorage.getItem(k)||"null");}catch(e){return null;}}
+function lsSet(k,v){try{if(v==null)localStorage.removeItem(k);else localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+function dndOn(){const d=lsGet(DND_KEY); if(!d||!d.at)return false; const now=new Date(), cut=new Date(now); cut.setHours(6,0,0,0); if(now<cut)cut.setDate(cut.getDate()-1); return new Date(d.at)>=cut;}
+function setDnd(on){lsSet(DND_KEY,on?{at:new Date().toISOString()}:null);}
+function otherLive(){const l=lsGet(LIVE_KEY); return !!(l&&l.tab!==TAB_ID&&Date.now()-l.at<12000);}
+function clearLive(){const l=lsGet(LIVE_KEY); if(l&&l.tab===TAB_ID)lsSet(LIVE_KEY,null);}
+window.addEventListener("pagehide",clearLive);
+function renderSleep(){
+  stage.classList.toggle("asleep",asleep);
+  if(asleep){eyeL.setAttribute("ry",1.3);eyeR.setAttribute("ry",1.3);stage.classList.remove("speaking","listening");}
+  else{eyeL.setAttribute("ry",EYE_RY);eyeR.setAttribute("ry",EYE_RY);}
+  $("startBtn").hidden=!asleep; $("startBtn").disabled=false; $("sleepBtn").hidden=asleep;
+  if(asleep){statusText.textContent="Asleep"; heard.classList.remove("interim");
+    heard.textContent= dndOn()?"Asleep because you said so. Say “Hey Alfred” to wake him."
+      : otherLive()?"Asleep. Alfred is working in another tab."
+      : micBlocked?"Asleep. Press Wake Alfred."
+      : document.visibilityState!=="visible"?"Asleep. Not listening while this tab is in the background."
+      : "Asleep. Listening only for “Hey Alfred”.";}
+  if(!REMOTE){qmeta.textContent="Alfred"; qEl.textContent=asleep?"Asleep. Say “Hey Alfred” to wake him.":"Awake. Say “Sleep Alfred” to send him back to sleep. Routines open their own Alfred tab for their questions; this tab keeps your My Day and emails on screen.";}
+}
+function wakeUp(source){
+  if(source==="remote"&&dndOn()){renderSleep();publishBridge();return false;}
+  if(source!=="remote")setDnd(false);
+  asleep=false; lastActive=Date.now(); stopWake(); renderSleep();
+  if(REMOTE){lsSet(LIVE_KEY,{tab:TAB_ID,at:Date.now()});wakeRemote();} else {speak("Yes, Phil?");}
+  return true;
+}
+function goToSleep(byPhil){
+  if(byPhil)setDnd(true);
+  const was=!asleep; asleep=true; stopWake();
+  if(REMOTE){remoteReady=false; if(running)stop(true); else{stopListening(); if(synth)synth.cancel();} clearLive(); publishBridge();}
+  else{stopListening();}
+  renderSleep();
+  if(was&&byPhil)speak("Goodnight, Phil.").then(renderSleep);
+}
+function ambientWanted(){
+  if(!SR||micBlocked||document.visibilityState!=="visible")return false;
+  if(currentRec||pending||speaking)return false;
+  if(asleep&&otherLive())return false;
+  if(!asleep&&REMOTE&&remoteBusy)return false;
+  return true;
+}
+$("sleepBtn").addEventListener("click",()=>goToSleep(true));
+document.addEventListener("visibilitychange",()=>{if(asleep)renderSleep();});
+setInterval(()=>{
+  if(REMOTE&&!asleep)lsSet(LIVE_KEY,{tab:TAB_ID,at:Date.now()});
+  if(remoteBusy||speaking||pending)lastActive=Date.now();
+  if(!asleep&&!REMOTE&&Date.now()-lastActive>180000)goToSleep(false);
+  if(!asleep&&REMOTE&&!remoteBusy&&Date.now()-lastActive>600000)goToSleep(false);
+  if(wakeRec&&!ambientWanted())stopWake(); else if(!wakeRec&&ambientWanted())startWake();
+  if(asleep)renderSleep();
+},1500);
+renderSleep();
+
 document.addEventListener("alfred-command",e=>{try{const c=JSON.parse(e.detail);const res=api[c.cmd]?api[c.cmd](c.arg):"unknown";bridge.dataset.last=JSON.stringify(res);}catch(err){bridge.dataset.last=JSON.stringify("error");}publishBridge();});
 if(REMOTE){
   document.title="Alfred";
   $("startBtn").textContent="Wake Alfred";
-  heard.textContent="Click Wake Alfred, then allow the microphone.";
   qmeta.textContent="Alfred";
   qEl.textContent="Waiting for your instruction. Keep this tab open.";
   $("hint").textContent="Say the answer or its number. Say “repeat”, “skip”, “later” or “go back”. Tapping and typing also work, even while Alfred is talking. You can change any answer on the review screen at the end.";
