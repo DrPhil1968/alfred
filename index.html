@@ -356,7 +356,10 @@ function schedule(text,startAt,msPerChar){
 const mouth=$("mouth"),tongue=$("tongue"),smile=$("smile");
 function frame(now){
   let target=SHAPES.rest;
-  if(speaking&&timeline.length){
+  const lvl=azPlaying?azLevel():-1;
+  if(speaking&&lvl>=0){
+    target= lvl>0.16?SHAPES.A : lvl>0.10?SHAPES.O : lvl>0.06?SHAPES.mid : lvl>0.025?SHAPES.F : SHAPES.M;
+  } else if(speaking&&timeline.length){
     let s="rest"; for(const k of timeline){if(k.t<=now)s=k.shape;else break;}
     target=SHAPES[s];
   }
@@ -399,11 +402,72 @@ function setPronounce(list){let n=0;(Array.isArray(list)?list:[]).forEach(p=>{tr
 const CODE_RE=/\s*\(?\b[A-Z]{2,5}(?:-[A-Z]{2,5})*-\d[\dA-Z]*(?:-[\dA-Z]+)*\b\)?\s*[:\u2013\u2014-]?\s*/g;
 function dropCodes(t){return t.replace(CODE_RE," ").replace(/\s+([,.?!;:])/g,"$1").replace(/\s{2,}/g," ").trim();}
 function sayLike(t){return PRONOUNCE.reduce((x,[re,say])=>x.replace(re,say),dropCodes(t));}
-function speak(text){
+
+/* ---------- Oliver (Azure neural voice) ----------
+   The key lives only in this browser (localStorage), never in this public repo.
+   Set it once: open the page with #voicekey on the end of the address. */
+const AZ={voice:"en-GB-OliverNeural",region:"uksouth",lsKey:"alfred.azureSpeechKey"};
+function azKey(){try{return localStorage.getItem(AZ.lsKey)||"";}catch(e){return "";}}
+function azSetKey(k){try{if(k)localStorage.setItem(AZ.lsKey,k.trim());else localStorage.removeItem(AZ.lsKey);return true;}catch(e){return false;}}
+if(location.hash==="#voicekey"){
+  setTimeout(()=>{const k=window.prompt("Paste Alfred's Azure Speech key (KEY 1). It is stored only in this browser. Leave empty to remove it.",""); if(k!==null){azSetKey(k);} history.replaceState(null,"",location.pathname); alert(azKey()?"Oliver is on.":"Key removed – Alfred will use Daniel.");},300);
+}
+const azAudio=new Audio(); azAudio.preload="auto";
+let azCtx=null, azAnalyser=null, azBuf=null, azPlaying=false, azFailUntil=0;
+const azCache=new Map();
+function azXml(t){return t.replace(/[<>&'"]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;","'":"&apos;",'"':"&quot;"}[c]));}
+async function azFetch(text){
+  if(azCache.has(text))return azCache.get(text);
+  const ssml=`<speak version="1.0" xml:lang="en-GB"><voice name="${AZ.voice}">${azXml(text)}</voice></speak>`;
+  const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(),8000);
+  try{
+    const r=await fetch(`https://${AZ.region}.tts.speech.microsoft.com/cognitiveservices/v1`,{method:"POST",signal:ctl.signal,
+      headers:{"Ocp-Apim-Subscription-Key":azKey(),"Content-Type":"application/ssml+xml","X-Microsoft-OutputFormat":"audio-24khz-96kbitrate-mono-mp3"},body:ssml});
+    if(!r.ok)throw new Error("azure "+r.status);
+    const url=URL.createObjectURL(await r.blob());
+    if(azCache.size>60){const [k,u]=azCache.entries().next().value;URL.revokeObjectURL(u);azCache.delete(k);}
+    azCache.set(text,url); return url;
+  }finally{clearTimeout(to);}
+}
+/* Fetch ahead so the next line starts without a pause. */
+function prefetchSpeech(list){if(!azKey())return;(list||[]).forEach(t=>{try{azFetch(sayLike(String(t))).catch(()=>{});}catch(e){}});}
+function azLevel(){
+  if(!azAnalyser)return -1;
+  azAnalyser.getByteTimeDomainData(azBuf); let sum=0;
+  for(let i=0;i<azBuf.length;i++){const v=(azBuf[i]-128)/128;sum+=v*v;}
+  return Math.sqrt(sum/azBuf.length);
+}
+function azWireAnalyser(){
+  if(azAnalyser||!window.AudioContext)return;
+  try{azCtx=new AudioContext();const src=azCtx.createMediaElementSource(azAudio);azAnalyser=azCtx.createAnalyser();azAnalyser.fftSize=512;
+    azBuf=new Uint8Array(azAnalyser.fftSize);src.connect(azAnalyser);azAnalyser.connect(azCtx.destination);}catch(e){azAnalyser=null;}
+}
+function stopVoice(){if(synth){synth.cancel();} try{azAudio.pause();azAudio.onended&&azAudio.onended();}catch(e){} azPlaying=false;}
+/* Returns true if Oliver spoke, false if the caller should use Daniel. */
+async function speakOliver(text){
+  if(!azKey()||Date.now()<azFailUntil)return false;
+  let url; try{url=await azFetch(text);}catch(e){azFailUntil=Date.now()+5*60*1000; console.warn("[Alfred] Oliver unavailable, using Daniel:",e.message); return false;}
+  azWireAnalyser(); if(azCtx&&azCtx.state==="suspended"){try{await azCtx.resume();}catch(e){}}
+  return await new Promise(res=>{
+    let started=false, ended=false;
+    const end=ok=>{if(ended)return;ended=true;azPlaying=false;speaking=false;timeline=[];azAudio.onended=azAudio.onerror=null;res(ok);};
+    azAudio.onended=()=>end(true); azAudio.onerror=()=>end(started);
+    azAudio.src=url;
+    azAudio.play().then(()=>{started=true;azPlaying=true;speaking=true;setState("speaking","Speaking");
+      if(!azAnalyser){const ms=Math.max(30,(azAudio.duration*1000||text.length*62)/Math.max(1,text.length));timeline=schedule(text,performance.now(),ms);}
+    }).catch(e=>{console.warn("[Alfred] audio blocked, using Daniel:",e.name);end(false);});
+  });
+}
+async function speak(text){
+  stopVoice();
+  text=sayLike(text);
+  if(await speakOliver(text)){setState("idle",running?"Thinking…":"Ready");return;}
+  return speakDaniel(text);
+}
+function speakDaniel(text){
   return new Promise(resolve=>{
     if(!synth){resolve();return;}
     synth.cancel();
-    text=sayLike(text);
     const u=new SpeechSynthesisUtterance(text);
     const v=chosenVoice; if(v){u.voice=v;u.lang=v.lang;} else u.lang="en-GB";
     u.rate=1; let gotBoundary=false, fallbackTimer=null, finished=false;
@@ -537,7 +601,7 @@ function stop(quiet){
   if(gate){const g=gate;running=false;g.release();}
   running=false; if(longCtl){longCtl.kill();longCtl=null;} if(pending){const p=pending;pending=null;p({cmd:"stop"});}
   $("backBtn").disabled=true; if(typeof recBox!=="undefined")recBox.hidden=true;
-  stopListening(); if(synth)synth.cancel(); speaking=false; timeline=[];
+  stopListening(); stopVoice(); speaking=false; timeline=[];
   ["repeatBtn","skipBtn","stopBtn","laterBtn"].forEach(id=>$(id).disabled=true); $("startBtn").disabled=false; 
   setState("idle","Ready"); if(!quiet)heard.textContent="Stopped.";
   if(wakeChk.checked)startWake();
@@ -694,6 +758,7 @@ function waitForPhil(name){
   });
 }
 async function remoteRunAll(list){
+  prefetchSpeech(["Right, Phil. Here we go.","Thank you. I'll update To Do now.","Skipping that one."].concat(list.map(r=>r.text).filter(Boolean)));
   remoteBusy=true; batch={total:list.length,asked:0,done:false,reviewing:false,waiting:true,waitingSince:Date.now()}; publishBridge();
   await waitForPhil(routineName(list));
   if(!running){batch.done=true;remoteBusy=false;publishBridge();return;}
@@ -969,7 +1034,7 @@ function wakeUp(source){
 function goToSleep(byPhil){
   if(byPhil)setDnd(true);
   const was=!asleep; asleep=true; stopWake();
-  if(REMOTE){remoteReady=false; if(running)stop(true); else{stopListening(); if(synth)synth.cancel();} clearLive(); publishBridge();}
+  if(REMOTE){remoteReady=false; if(running)stop(true); else{stopListening(); stopVoice();} clearLive(); publishBridge();}
   else{stopListening();}
   renderSleep();
   if(was&&byPhil)speak("Snoozing. Say Hey Alfred when you need me.").then(renderSleep);
